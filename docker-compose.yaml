@@ -1,173 +1,48 @@
-version: "3.9"
-
-networks:
-  eldercare-net:
-    driver: bridge
-
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    container_name: zookeeper
-    networks:
-      - eldercare-net
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
-  kafka:
-    image: confluentinc/cp-kafka:7.4.0
-    container_name: kafka
-    networks:
-      - eldercare-net
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-
-  kafdrop:
-    image: obsidiandynamics/kafdrop:latest
-    container_name: kafdrop
-    networks:
-      - eldercare-net
-    depends_on:
-      - kafka
-    ports:
-      - "9000:9000"
-    environment:
-      KAFKA_BROKERCONNECT: kafka:29092
-      JVM_OPTS: "-Xms32M -Xmx64M"
-
-  redis:
-    image: redis:7.2-alpine
-    container_name: redis
-    networks:
-      - eldercare-net
-    ports:
-      - "6379:6379"
-
-  redisinsight:
-    image: redis/redisinsight:latest
-    container_name: redisinsight
-    networks:
-      - eldercare-net
-    depends_on:
-      - redis
-    ports:
-      - "5540:5540"
-
   postgres:
     image: postgres:16-alpine
-    container_name: postgres
-    networks:
-      - eldercare-net
+    environment:
+      POSTGRES_DB: whatsapp_call_service
+      POSTGRES_USER: lumina
+      POSTGRES_PASSWORD: lumina
     ports:
       - "5432:5432"
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/init/create_databases.sql:/docker-entrypoint-initdb.d/create_databases.sql
+      - whatsapp_call_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin"]
+      test: ["CMD-SHELL", "pg_isready -U lumina -d whatsapp_call_service"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  driver-service:
+  whatsapp-call-api:
     build:
-      context: .
-      dockerfile: backend/driver/Dockerfile
-    container_name: driver-service
-    networks:
-      - eldercare-net
-    depends_on:
-      postgres:
-        condition: service_healthy
-      kafka:
-        condition: service_started
+      context: ./backend/whatsapp_call_service
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://lumina:lumina@postgres:5432/whatsapp_call_service
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8001}
     ports:
       - "8001:8001"
-    env_file:
-      - .env
-    # Override localhost values with internal docker-network hostnames
-    environment:
-      POSTGRES_HOST: postgres
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-
-  escort-service:
-    build:
-      context: .
-      dockerfile: backend/escort/Dockerfile
-    container_name: escort-service
-    networks:
-      - eldercare-net
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_started
-    ports:
-      - "8002:8002"
+
+  whatsapp-call-worker:
+    build:
+      context: ./backend/whatsapp_call_service
+    command: ["python", "-m", "app.worker"]
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-
-  trip-audit-service:
-    build:
-      context: .
-      dockerfile: backend/trip_audit/Dockerfile
-    container_name: trip-audit-service
-    networks:
-      - eldercare-net
+      DATABASE_URL: postgresql+psycopg://lumina:lumina@postgres:5432/whatsapp_call_service
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8001}
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
+      whatsapp-call-api:
         condition: service_started
-    ports:
-      - "8003:8003"
-    env_file:
-      - .env
-    environment:
-      POSTGRES_HOST: postgres
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-
-  transport-service:
-    build:
-      context: .
-      dockerfile: backend/transport/Dockerfile
-    container_name: transport-service
-    networks:
-      - eldercare-net
-    depends_on:
-      - kafka
-      - redis
-      - driver-service
-      - escort-service
-      - trip-audit-service
-    ports:
-      - "8000:8000"
-    env_file:
-      - backend/transport/.env
-    environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      REDIS_URL: redis://redis:6379/0
-      DRIVER_SERVICE_URL: http://driver-service:8001
-      ESCORT_SERVICE_URL: http://escort-service:8002
-      TRIP_AUDIT_SERVICE_URL: http://trip-audit-service:8003
 
 volumes:
-  postgres_data:
+  whatsapp_call_postgres:
