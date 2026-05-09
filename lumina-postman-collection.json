@@ -1,0 +1,705 @@
+{
+  "info": {
+    "_postman_id": "lumina-eldercare-v1",
+    "name": "Lumina ElderCare API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "driver_base", "value": "http://localhost:8001", "type": "string" },
+    { "key": "escort_base", "value": "http://localhost:8002", "type": "string" },
+    { "key": "audit_base", "value": "http://localhost:8003", "type": "string" },
+    { "key": "transport_base", "value": "http://localhost:8000", "type": "string" },
+    { "key": "provider_id", "value": "11111111-1111-1111-1111-111111111111", "type": "string" },
+    { "key": "driver_id", "value": "", "type": "string" },
+    { "key": "escort_id", "value": "", "type": "string" },
+    { "key": "trip_id", "value": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "type": "string" },
+    { "key": "elderly_id", "value": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "type": "string" },
+    { "key": "caregiver_id", "value": "cccccccc-cccc-cccc-cccc-cccccccccccc", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health Checks",
+      "item": [
+        {
+          "name": "Health - Driver Service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/health", "host": ["{{driver_base}}"], "path": ["drivers", "health"] }
+          }
+        },
+        {
+          "name": "Health - Escort Service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/health", "host": ["{{escort_base}}"], "path": ["escorts", "health"] }
+          }
+        },
+        {
+          "name": "Health - Trip Audit Service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{audit_base}}/trips/health", "host": ["{{audit_base}}"], "path": ["trips", "health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Driver Service",
+      "item": [
+        {
+          "name": "Create Driver",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.collectionVariables.set('driver_id', json.driver_id);",
+                  "    console.log('Saved driver_id:', json.driver_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"SunCare Transport\",\n  \"provider_address\": \"123 Yishun Ave 2, Singapore 760123\",\n  \"provider_phone\": \"+6591234567\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Ahmad Bin Ali\",\n  \"phone\": \"+6598765432\",\n  \"vehicle_type\": \"STANDARD\",\n  \"service_areas\": [\"Yishun\", \"Woodlands\"],\n  \"capability_flags\": [\"dementia\", \"oxygen_tank\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+            },
+            "url": { "raw": "{{driver_base}}/drivers", "host": ["{{driver_base}}"], "path": ["drivers"] }
+          }
+        },
+        {
+          "name": "List All Drivers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers", "host": ["{{driver_base}}"], "path": ["drivers"] }
+          }
+        },
+        {
+          "name": "Get Driver by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}"] }
+          }
+        },
+        {
+          "name": "Get Available Drivers (query params - use Params tab)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{driver_base}}/drivers/available?vehicle_type=STANDARD&datetime=2026-06-09T10:00:00&pickup_lat=1.35&pickup_lng=103.82&service_area=Yishun",
+              "host": ["{{driver_base}}"],
+              "path": ["drivers", "available"],
+              "query": [
+                { "key": "vehicle_type", "value": "STANDARD" },
+                { "key": "datetime", "value": "2026-06-09T10:00:00" },
+                { "key": "pickup_lat", "value": "1.35" },
+                { "key": "pickup_lng", "value": "103.82" },
+                { "key": "service_area", "value": "Yishun" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Driver Status to OFFLINE",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{ \"status\": \"OFFLINE\" }"
+            },
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/status", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "status"] }
+          }
+        },
+        {
+          "name": "Update Driver Status to AVAILABLE",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{ \"status\": \"AVAILABLE\" }"
+            },
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/status", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "status"] }
+          }
+        },
+        {
+          "name": "Driver - Accept Trip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/accept", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "accept"] }
+          }
+        },
+        {
+          "name": "Driver - Reject Trip",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{ \"reason\": \"personal emergency\" }"
+            },
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/reject", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "reject"] }
+          }
+        },
+        {
+          "name": "Driver - Complete Trip",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"photo_url\": \"https://example.com/dropoff-photo.jpg\",\n  \"dropoff_confirmed\": true\n}"
+            },
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/complete", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "complete"] }
+          }
+        },
+        {
+          "name": "Driver - I Am Reaching",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/reaching", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "reaching"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Escort Service",
+      "item": [
+        {
+          "name": "Create Escort",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.collectionVariables.set('escort_id', json.escort_id);",
+                  "    console.log('Saved escort_id:', json.escort_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"SunCare Transport\",\n  \"provider_address\": \"123 Yishun Ave 2, Singapore 760123\",\n  \"provider_phone\": \"+6591234567\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Siti Binte Rahman\",\n  \"phone\": \"+6587654321\",\n  \"languages\": [\"english\", \"malay\"],\n  \"specialisations\": [\"dementia\", \"wheelchair\"],\n  \"service_areas\": [\"Yishun\", \"Woodlands\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+            },
+            "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+          }
+        },
+        {
+          "name": "List All Escorts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+          }
+        },
+        {
+          "name": "Get Escort by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}"] }
+          }
+        },
+        {
+          "name": "Get Available Escorts (query params - use Params tab)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{escort_base}}/escorts/available?datetime=2026-06-09T10:00:00&pickup_lat=1.35&pickup_lng=103.82&service_area=Yishun&languages=english",
+              "host": ["{{escort_base}}"],
+              "path": ["escorts", "available"],
+              "query": [
+                { "key": "datetime", "value": "2026-06-09T10:00:00" },
+                { "key": "pickup_lat", "value": "1.35" },
+                { "key": "pickup_lng", "value": "103.82" },
+                { "key": "service_area", "value": "Yishun" },
+                { "key": "languages", "value": "english" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Escort Status to AVAILABLE",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{ \"status\": \"AVAILABLE\" }"
+            },
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/status", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "status"] }
+          }
+        },
+        {
+          "name": "Escort - Accept Trip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/accept", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "accept"] }
+          }
+        },
+        {
+          "name": "Escort - Reject Trip",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{ \"reason\": \"unavailable\" }"
+            },
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/reject", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "reject"] }
+          }
+        },
+        {
+          "name": "Escort - Complete Trip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/complete", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "complete"] }
+          }
+        },
+        {
+          "name": "Escort - I Am Reaching",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/reaching", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "reaching"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Trip Audit Service",
+      "item": [
+        {
+          "name": "List All Trip Audits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{audit_base}}/trips", "host": ["{{audit_base}}"], "path": ["trips"] }
+          }
+        },
+        {
+          "name": "List Audits - Filter by outcome COMPLETED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{audit_base}}/trips?outcome=COMPLETED",
+              "host": ["{{audit_base}}"],
+              "path": ["trips"],
+              "query": [{ "key": "outcome", "value": "COMPLETED" }]
+            }
+          }
+        },
+        {
+          "name": "Get Audit by Trip ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{audit_base}}/trips/{{trip_id}}", "host": ["{{audit_base}}"], "path": ["trips", "{{trip_id}}"] }
+          }
+        },
+        {
+          "name": "Manual Create Audit Record (COMPLETED)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"trip_id\": \"{{trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"outcome\": \"COMPLETED\",\n  \"trip_type\": \"COMBINED\",\n  \"driver_id\": \"{{driver_id}}\",\n  \"escort_id\": \"{{escort_id}}\",\n  \"pickup_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"dropoff_location\": { \"lat\": 1.30, \"lng\": 103.85 },\n  \"appointment_datetime\": \"2026-06-09T10:00:00\",\n  \"photo_url\": \"https://example.com/photo.jpg\",\n  \"dropoff_confirmed\": true,\n  \"completed_at\": \"2026-06-09T11:30:00\"\n}"
+            },
+            "url": { "raw": "{{audit_base}}/trips", "host": ["{{audit_base}}"], "path": ["trips"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Transport Service",
+      "item": [
+        {
+          "name": "Submit Trip (triggers matching via Kafka)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"trip_id\": \"{{trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"dropoff_location\": { \"lat\": 1.30, \"lng\": 103.85 },\n  \"appointment_datetime\": \"2026-06-09T10:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Yishun\"\n}"
+            },
+            "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+          }
+        },
+        {
+          "name": "Get Trip Status (check Redis candidates)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/status", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "status"] }
+          }
+        },
+        {
+          "name": "Cancel Trip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/cancel", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "cancel"] }
+          }
+        },
+        {
+          "name": "Notify Reaching (Driver)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"actor_id\": \"{{driver_id}}\",\n  \"actor_type\": \"driver\"\n}"
+            },
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/reaching", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "reaching"] }
+          }
+        },
+        {
+          "name": "Dashboard - Admin View",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{transport_base}}/transport/dashboard?role=admin",
+              "host": ["{{transport_base}}"],
+              "path": ["transport", "dashboard"],
+              "query": [{ "key": "role", "value": "admin" }]
+            }
+          }
+        },
+        {
+          "name": "Dashboard - Driver View",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{transport_base}}/transport/dashboard?role=driver&id={{driver_id}}",
+              "host": ["{{transport_base}}"],
+              "path": ["transport", "dashboard"],
+              "query": [
+                { "key": "role", "value": "driver" },
+                { "key": "id", "value": "{{driver_id}}" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dashboard HTML Page - Admin",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{transport_base}}/transport/dashboard/page?role=admin",
+              "host": ["{{transport_base}}"],
+              "path": ["transport", "dashboard", "page"],
+              "query": [{ "key": "role", "value": "admin" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Full Flow - Step by Step",
+      "item": [
+        {
+          "name": "STEP 1 - Create Driver (SEED DATA)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.collectionVariables.set('driver_id', json.driver_id);",
+                  "    pm.test('Driver created, ID saved', function() {",
+                  "        pm.expect(json.driver_id).to.be.a('string');",
+                  "        pm.expect(json.status).to.equal('AVAILABLE');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"SunCare Transport\",\n  \"provider_address\": \"123 Yishun Ave 2, Singapore 760123\",\n  \"provider_phone\": \"+6591234567\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Ahmad Bin Ali\",\n  \"phone\": \"+6598765432\",\n  \"vehicle_type\": \"STANDARD\",\n  \"service_areas\": [\"Yishun\"],\n  \"capability_flags\": [],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+            },
+            "url": { "raw": "{{driver_base}}/drivers", "host": ["{{driver_base}}"], "path": ["drivers"] }
+          }
+        },
+        {
+          "name": "STEP 2 - Create Escort (SEED DATA)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.collectionVariables.set('escort_id', json.escort_id);",
+                  "    pm.test('Escort created, ID saved', function() {",
+                  "        pm.expect(json.escort_id).to.be.a('string');",
+                  "        pm.expect(json.status).to.equal('AVAILABLE');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"SunCare Transport\",\n  \"provider_address\": \"123 Yishun Ave 2, Singapore 760123\",\n  \"provider_phone\": \"+6591234567\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Siti Binte Rahman\",\n  \"phone\": \"+6587654321\",\n  \"languages\": [\"english\", \"malay\"],\n  \"specialisations\": [],\n  \"service_areas\": [\"Yishun\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+            },
+            "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+          }
+        },
+        {
+          "name": "STEP 3 - Submit Trip to Transport (starts matching)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Accepted 202 with matching_in_progress', function() {",
+                  "    pm.expect(pm.response.code).to.equal(202);",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal('matching_in_progress');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"trip_id\": \"{{trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"dropoff_location\": { \"lat\": 1.30, \"lng\": 103.85 },\n  \"appointment_datetime\": \"2026-06-09T10:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Yishun\"\n}"
+            },
+            "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+          }
+        },
+        {
+          "name": "STEP 3b - Check Kafdrop for trip.offered.driver and trip.offered.escort",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "http://localhost:9000", "host": ["http://localhost:9000"], "path": [] },
+            "description": "Open http://localhost:9000 in browser. Look for topics: trip.requested, trip.offered.driver, trip.offered.escort. Messages should appear within ~2 seconds of Step 3."
+          }
+        },
+        {
+          "name": "STEP 4 - Driver Accepts Trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Driver accepted trip', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    pm.expect(pm.response.json().message).to.equal('accepted');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/accept", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "accept"] }
+          }
+        },
+        {
+          "name": "STEP 5 - Escort Accepts Trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Escort accepted trip', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    pm.expect(pm.response.json().message).to.equal('accepted');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/accept", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "accept"] }
+          }
+        },
+        {
+          "name": "STEP 6 - Driver Reaching (notifies MET Engine via Transport)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"actor_id\": \"{{driver_id}}\",\n  \"actor_type\": \"driver\"\n}"
+            },
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/reaching", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "reaching"] }
+          }
+        },
+        {
+          "name": "STEP 7 - Driver Completes Trip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Driver marked trip complete', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    pm.expect(pm.response.json().message).to.equal('completed');",
+                  "});",
+                  "pm.test('Check Kafdrop for trip.completed.driver (NOT trip.completed yet)', function() {",
+                  "    pm.expect(true).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"photo_url\": \"https://example.com/dropoff-photo.jpg\",\n  \"dropoff_confirmed\": true\n}"
+            },
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{trip_id}}/complete", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}", "trips", "{{trip_id}}", "complete"] }
+          }
+        },
+        {
+          "name": "STEP 8 - Escort Completes Trip (triggers trip.completed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Escort marked trip complete', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    pm.expect(pm.response.json().message).to.equal('completed');",
+                  "});",
+                  "pm.test('After this step: check Kafdrop for trip.completed, then verify Trip Audit in STEP 9', function() {",
+                  "    pm.expect(true).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{trip_id}}/complete", "host": ["{{escort_base}}"], "path": ["escorts", "{{escort_id}}", "trips", "{{trip_id}}", "complete"] }
+          }
+        },
+        {
+          "name": "STEP 9 - Verify Trip Audit Record Written",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Audit record exists with COMPLETED outcome', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.outcome).to.equal('COMPLETED');",
+                  "    pm.expect(json.trip_type).to.equal('COMBINED');",
+                  "    pm.expect(json.dropoff_confirmed).to.equal(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{audit_base}}/trips/{{trip_id}}", "host": ["{{audit_base}}"], "path": ["trips", "{{trip_id}}"] }
+          }
+        },
+        {
+          "name": "STEP 10 - Verify Driver Back to AVAILABLE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Driver is AVAILABLE after completing trip', function() {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal('AVAILABLE');",
+                  "    pm.expect(json.future_trip_ids).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}"] }
+          }
+        }
+      ]
+    }
+  ]
+}
