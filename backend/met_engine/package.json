@@ -1,0 +1,22 @@
+{
+  "name": "carekaki-met-engine",
+  "version": "1.0.0",
+  "description": "MET Engine — stateless orchestration. Validation, subsidy compute, Kafka pub/sub.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
