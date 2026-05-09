@@ -177,6 +177,8 @@ async def _store_composition_and_assignment(
     trip_id: uuid.UUID,
     driver: Optional[DriverMatch],
     escort: Optional[EscortMatch],
+    elderly_id: Optional[uuid.UUID] = None,
+    caregiver_id: Optional[uuid.UUID] = None,
 ) -> None:
     has_driver = driver is not None
     has_escort = escort is not None
@@ -198,6 +200,8 @@ async def _store_composition_and_assignment(
     assignment = {
         "driver_id": str(driver.driver_id) if driver else None,
         "escort_id": str(escort.escort_id) if escort else None,
+        "elderly_id": str(elderly_id) if elderly_id else None,
+        "caregiver_id": str(caregiver_id) if caregiver_id else None,
     }
 
     async with _redis() as r:
@@ -233,7 +237,11 @@ async def match_trip(trip_request: TripRequest) -> MatchResult:
     escort = escorts[0]
     vehicle_type = _vehicle_type_from_flags(trip_request.mobility_flags)
 
-    await _store_composition_and_assignment(trip_request.trip_id, driver, escort)
+    await _store_composition_and_assignment(
+        trip_request.trip_id, driver, escort,
+        elderly_id=trip_request.elderly_id,
+        caregiver_id=trip_request.caregiver_id,
+    )
 
     return MatchResult(
         success=True,

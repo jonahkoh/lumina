@@ -199,11 +199,15 @@ async def _publish_completed(trip_id_str: str, completed_at: str, source_data: d
     assignment = await get_trip_assignment(trip_id)
     driver_id = assignment.get("driver_id") if assignment else None
     escort_id = assignment.get("escort_id") if assignment else None
+    elderly_id = assignment.get("elderly_id") if assignment else None
+    caregiver_id = assignment.get("caregiver_id") if assignment else None
 
     publish("trip.completed", {
         "trip_id": trip_id_str,
         "driver_id": driver_id,
         "escort_id": escort_id,
+        "elderly_id": elderly_id,
+        "caregiver_id": caregiver_id,
         "trip_type": composition["trip_type"] if composition else None,
         "completed_at": completed_at,
         "photo_url": source_data.get("photo_url"),

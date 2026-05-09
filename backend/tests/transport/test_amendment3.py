@@ -45,8 +45,10 @@ def test_is_trip_complete_logic():
 
 
 def test_store_composition_sets_correct_trip_type():
-    """_store_composition_and_assignment writes correct trip_type to Redis."""
+    """_store_composition_and_assignment writes correct trip_type and all IDs to Redis."""
     trip_id = uuid.uuid4()
+    elderly_id = uuid.uuid4()
+    caregiver_id = uuid.uuid4()
     driver = DriverMatch(driver_id=uuid.uuid4(), vehicle_type="STANDARD", match_score=0.9)
     escort = EscortMatch(escort_id=uuid.uuid4(), match_score=0.8)
 
@@ -59,7 +61,10 @@ def test_store_composition_sets_correct_trip_type():
         async def expire(self, key, ttl): pass
 
     with patch("app.matching._redis", return_value=FakeRedis()):
-        asyncio.run(_store_composition_and_assignment(trip_id, driver, escort))
+        asyncio.run(_store_composition_and_assignment(
+            trip_id, driver, escort,
+            elderly_id=elderly_id, caregiver_id=caregiver_id,
+        ))
 
     comp = stored[f"trip:composition:{trip_id}"]
     assert comp["trip_type"] == "COMBINED"
@@ -69,3 +74,5 @@ def test_store_composition_sets_correct_trip_type():
     assign = stored[f"trip:assignment:{trip_id}"]
     assert assign["driver_id"] == str(driver.driver_id)
     assert assign["escort_id"] == str(escort.escort_id)
+    assert assign["elderly_id"] == str(elderly_id)
+    assert assign["caregiver_id"] == str(caregiver_id)
