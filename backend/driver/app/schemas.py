@@ -41,3 +41,17 @@ class DriverResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DriverWithScore(DriverResponse):
+    match_score: float
+
+
+class StatusUpdate(BaseModel):
+    status: DriverStatus
+
+
+class TripUpdate(BaseModel):
+    add_future_trip_id: Optional[uuid.UUID] = None
+    add_past_trip_id: Optional[uuid.UUID] = None
+    remove_future_trip_id: Optional[uuid.UUID] = None
