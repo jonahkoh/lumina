@@ -7,7 +7,7 @@ from app.database import get_db
 from app.dependencies import get_conversation_engine, get_twilio_service
 from app.models import MessageStatus, OutboundMessage, ScheduledCall, ScheduledCallStatus, TwilioEvent, utcnow
 from app.schemas import WebhookAck
-from app.services.conversation import ConversationEngine
+from app.services.conversation import ConversationEngine, is_reset_command
 from app.services.twilio_service import TwilioService
 
 router = APIRouter(prefix="/webhooks/twilio", tags=["twilio-webhooks"])
@@ -25,11 +25,29 @@ async def whatsapp_webhook(
     _record_event(db, "whatsapp_inbound", form.get("MessageSid") or f"{form.get('From')}:{form.get('SmsMessageSid')}", form)
 
     from_number = form.get("From", "")
-    body = form.get("Body", "")
-    reply = conversation.handle_message(db, from_number, body)
-    result = twilio.send_whatsapp_message(from_number, reply)
-    message = OutboundMessage(to_whatsapp=from_number, body=reply, twilio_sid=result.sid, status=MessageStatus.sent)
+    body = _normalized_inbound_body(form)
+    reply = conversation.handle_message(
+        db,
+        from_number,
+        body,
+        media_url=form.get("MediaUrl0"),
+        button_text=form.get("ButtonText"),
+        button_payload=form.get("ButtonPayload") or form.get("Payload"),
+    )
+    message = OutboundMessage(to_whatsapp=from_number, body=reply.body, status=MessageStatus.queued)
     db.add(message)
+    try:
+        result = twilio.send_whatsapp_template(
+            from_number,
+            reply.body,
+            content_sid=reply.content_sid,
+            content_variables=reply.content_variables,
+        )
+        message.twilio_sid = result.sid
+        message.status = MessageStatus.sent
+    except Exception as exc:
+        message.status = MessageStatus.failed
+        message.error_message = str(exc)
     db.commit()
     return WebhookAck()
 
@@ -97,3 +115,16 @@ def _record_event(db: Session, event_type: str, event_key: str, payload: dict) -
         db.commit()
     except IntegrityError:
         db.rollback()
+
+
+def _normalized_inbound_body(form: dict) -> str:
+    body = form.get("Body") or ""
+    if is_reset_command(body):
+        return body
+    return (
+        form.get("ButtonPayload")
+        or form.get("Payload")
+        or form.get("ButtonText")
+        or form.get("Body")
+        or ""
+    )

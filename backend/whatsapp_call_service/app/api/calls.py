@@ -20,11 +20,23 @@ def create_scheduled_call(
     settings: Settings = Depends(get_settings),
 ) -> ScheduledCall:
     audio_url = str(payload.audio_url) if payload.audio_url is not None else settings.twilio_static_call_audio_url
-    if not audio_url:
-        raise HTTPException(status_code=422, detail="TWILIO_STATIC_CALL_AUDIO_URL is required when audio_url is omitted")
+    if not audio_url and not payload.message_text:
+        raise HTTPException(
+            status_code=422,
+            detail="TWILIO_STATIC_CALL_AUDIO_URL or message_text is required when audio_url is omitted",
+        )
 
     try:
-        return schedule_call(db, settings, payload.to, payload.scheduled_at, audio_url=audio_url)
+        return schedule_call(
+            db,
+            settings,
+            payload.to,
+            payload.scheduled_at,
+            audio_url=audio_url,
+            message_text=payload.message_text,
+            appointment_location=payload.appointment_location,
+            language=payload.language,
+        )
     except PhoneNumberError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

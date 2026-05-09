@@ -3,8 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 from sqlalchemy.types import JSON
 
 from app.database import Base
@@ -19,14 +18,43 @@ def uuid_pk() -> uuid.UUID:
 
 
 def json_type():
-    return JSON().with_variant(JSONB, "postgresql")
+    return JSON()
 
 
 class ConversationState(str, enum.Enum):
     idle = "idle"
+    awaiting_role = "awaiting_role"
+    awaiting_caregiver_name = "awaiting_caregiver_name"
+    awaiting_caregiver_language = "awaiting_caregiver_language"
+    awaiting_relationship = "awaiting_relationship"
+    awaiting_elderly_name = "awaiting_elderly_name"
+    awaiting_elderly_phone = "awaiting_elderly_phone"
+    awaiting_pickup_address = "awaiting_pickup_address"
+    awaiting_postal_code = "awaiting_postal_code"
+    awaiting_elderly_language = "awaiting_elderly_language"
+    awaiting_mobility = "awaiting_mobility"
+    awaiting_notes = "awaiting_notes"
+    awaiting_profile_confirmation = "awaiting_profile_confirmation"
+    awaiting_elderly_selection = "awaiting_elderly_selection"
     awaiting_recipient = "awaiting_recipient"
     awaiting_time = "awaiting_time"
+    awaiting_appointment_location = "awaiting_appointment_location"
     awaiting_confirmation = "awaiting_confirmation"
+
+
+class ContactRole(str, enum.Enum):
+    caregiver = "caregiver"
+    elderly = "elderly"
+
+
+class MobilityLevel(str, enum.Enum):
+    need_transport = "need_transport"
+    need_escort = "need_escort"
+    need_both = "need_both"
+    independent = "independent"
+    walking_aid = "walking_aid"
+    wheelchair = "wheelchair"
+    escort_support = "escort_support"
 
 
 class MessageStatus(str, enum.Enum):
@@ -51,11 +79,16 @@ class Contact(Base):
     phone_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     whatsapp_address: Mapped[str] = mapped_column(String(48), unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[ContactRole | None] = mapped_column(Enum(ContactRole), nullable=True, index=True)
     opted_in: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
-    sessions: Mapped[list["ConversationSession"]] = relationship(back_populates="contact")
+    sessions: Mapped[list["ConversationSession"]] = orm_relationship(back_populates="contact")
+    caregiver_profile: Mapped["CaregiverProfile | None"] = orm_relationship(back_populates="contact")
+    elderly_profile: Mapped["ElderlyProfile | None"] = orm_relationship(
+        back_populates="contact", foreign_keys="ElderlyProfile.contact_id"
+    )
 
 
 class ConversationSession(Base):
@@ -68,7 +101,7 @@ class ConversationSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
-    contact: Mapped[Contact] = relationship(back_populates="sessions")
+    contact: Mapped[Contact] = orm_relationship(back_populates="sessions")
 
 
 class OutboundMessage(Base):
@@ -89,6 +122,63 @@ class OutboundMessage(Base):
         return self.to_whatsapp
 
 
+class CaregiverProfile(Base):
+    __tablename__ = "caregiver_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_pk)
+    contact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contacts.id"), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    phone_number: Mapped[str] = mapped_column(String(32), index=True)
+    preferred_language: Mapped[str] = mapped_column(String(64), default="english")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    contact: Mapped[Contact] = orm_relationship(back_populates="caregiver_profile")
+    elderly_links: Mapped[list["CaregiverElderlyLink"]] = orm_relationship(
+        back_populates="caregiver", cascade="all, delete-orphan"
+    )
+
+
+class ElderlyProfile(Base):
+    __tablename__ = "elderly_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_pk)
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"), unique=True, nullable=True, index=True)
+    created_by_contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    phone_number: Mapped[str] = mapped_column(String(32), index=True)
+    pickup_address: Mapped[str] = mapped_column(Text)
+    postal_code: Mapped[str] = mapped_column(String(16), index=True)
+    preferred_language: Mapped[str] = mapped_column(String(64), default="english")
+    mobility_level: Mapped[MobilityLevel] = mapped_column(Enum(MobilityLevel), default=MobilityLevel.need_transport)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    contact: Mapped[Contact | None] = orm_relationship(back_populates="elderly_profile", foreign_keys=[contact_id])
+    created_by_contact: Mapped[Contact | None] = orm_relationship(foreign_keys=[created_by_contact_id])
+    caregiver_links: Mapped[list["CaregiverElderlyLink"]] = orm_relationship(
+        back_populates="elderly", cascade="all, delete-orphan"
+    )
+
+
+class CaregiverElderlyLink(Base):
+    __tablename__ = "caregiver_elderly_links"
+    __table_args__ = (
+        UniqueConstraint("caregiver_profile_id", "elderly_profile_id", name="uq_caregiver_elderly_link"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_pk)
+    caregiver_profile_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("caregiver_profiles.id"), index=True)
+    elderly_profile_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("elderly_profiles.id"), index=True)
+    relationship: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    caregiver: Mapped[CaregiverProfile] = orm_relationship(back_populates="elderly_links")
+    elderly: Mapped[ElderlyProfile] = orm_relationship(back_populates="caregiver_links")
+
+
 class ScheduledCall(Base):
     __tablename__ = "scheduled_calls"
 
@@ -97,6 +187,9 @@ class ScheduledCall(Base):
     requested_by_whatsapp: Mapped[str | None] = mapped_column(String(48), nullable=True, index=True)
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     audio_url: Mapped[str] = mapped_column(Text)
+    message_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    appointment_location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str] = mapped_column(String(64), default="english")
     twilio_call_sid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[ScheduledCallStatus] = mapped_column(
         Enum(ScheduledCallStatus), default=ScheduledCallStatus.pending, index=True

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from fastapi import Request
@@ -28,11 +29,43 @@ class TwilioService:
         return self._client
 
     def send_whatsapp_message(self, to: str, body: str) -> TwilioResult:
+        return self._send_whatsapp(to=to, body=body)
+
+    def send_whatsapp_template(
+        self,
+        to: str,
+        body_fallback: str,
+        content_sid: str | None = None,
+        content_variables: dict[str, Any] | None = None,
+    ) -> TwilioResult:
+        return self._send_whatsapp(
+            to=to,
+            body=body_fallback,
+            content_sid=content_sid,
+            content_variables=content_variables,
+        )
+
+    def _send_whatsapp(
+        self,
+        to: str,
+        body: str,
+        content_sid: str | None = None,
+        content_variables: dict[str, Any] | None = None,
+    ) -> TwilioResult:
+        kwargs: dict[str, Any] = {
+            "from_": to_whatsapp_address(self.settings.whatsapp_sender_phone_number),
+            "to": to_whatsapp_address(to),
+            "status_callback": f"{self.settings.public_base_url.rstrip('/')}/webhooks/twilio/message/status",
+        }
+        if content_sid:
+            kwargs["content_sid"] = content_sid
+            if content_variables:
+                kwargs["content_variables"] = json.dumps(content_variables)
+        else:
+            kwargs["body"] = body
+
         message = self.client.messages.create(
-            from_=to_whatsapp_address(self.settings.whatsapp_sender_phone_number),
-            to=to_whatsapp_address(to),
-            body=body,
-            status_callback=f"{self.settings.public_base_url.rstrip('/')}/webhooks/twilio/message/status",
+            **kwargs,
         )
         return TwilioResult(sid=message.sid, status=getattr(message, "status", None))
 
