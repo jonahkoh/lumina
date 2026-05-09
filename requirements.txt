@@ -10,3 +10,5 @@ httpx
 pydantic
 pydantic-settings
 cloud-sql-python-connector[asyncpg]
+pytest
+pytest-asyncio
