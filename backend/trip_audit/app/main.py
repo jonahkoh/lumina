@@ -97,6 +97,8 @@ async def _handle_cancelled(data: dict) -> None:
         elderly_id=uuid.UUID(str(data["elderly_id"])),
         caregiver_id=uuid.UUID(str(data["caregiver_id"])),
         outcome=AuditOutcome.CANCELLED,
+        driver_id=_parse_uuid(data.get("driver_id")),
+        escort_id=_parse_uuid(data.get("escort_id")),
         reason=data.get("reason"),
     )
     async with AsyncSessionLocal() as db:
