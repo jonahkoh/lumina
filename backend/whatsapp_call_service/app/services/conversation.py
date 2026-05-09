@@ -22,6 +22,7 @@ from app.models import (
     ScheduledCallStatus,
 )
 from app.services.phone_numbers import PhoneNumberError, normalize_e164, to_whatsapp_address
+from app.services.ocr_service import OCRService
 from app.services.scheduler import schedule_call
 from app.services.singapore_time import SingaporeTimeParseError, parse_singapore_time
 from app.services.translation_service import TranslationService
@@ -38,9 +39,15 @@ class WhatsAppReply:
 
 
 class ConversationEngine:
-    def __init__(self, settings: Settings, translation: TranslationService | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        translation: TranslationService | None = None,
+        ocr: OCRService | None = None,
+    ) -> None:
         self.settings = settings
         self.translation = translation or TranslationService(settings)
+        self.ocr = ocr or OCRService(settings)
 
     def handle_message(
         self,
@@ -79,7 +86,7 @@ class ConversationEngine:
         )
 
         if media_url:
-            return WhatsAppReply("Image parsing is not ready yet. Please type the appointment details.")
+            return self._handle_ocr_upload(db, contact, session, media_url)
 
         if is_reset_command(lowered):
             previous_language = self._preferred_language(db, contact, session)
@@ -310,6 +317,121 @@ class ConversationEngine:
 
         return None
 
+    def _handle_ocr_upload(
+        self, db: Session, contact: Contact, session: ConversationSession, media_url: str
+    ) -> WhatsAppReply:
+        if contact.role is None or session.data.get("awaiting_start_language"):
+            session.state = ConversationState.awaiting_role
+            session.data = {"awaiting_start_language": True}
+            db.commit()
+            return self._language_prompt(
+                prefix="Please choose a language before uploading a HealthHub screenshot.",
+                language_override="english",
+            )
+
+        caregiver = self._caregiver_profile(db, contact)
+        if caregiver is None:
+            if session.data.get("caregiver_name"):
+                caregiver = self._upsert_caregiver_profile(
+                    db,
+                    contact,
+                    {
+                        "caregiver_name": session.data.get("caregiver_name"),
+                        "caregiver_language": session.data.get("caregiver_language")
+                        or self._preferred_language(db, contact, session),
+                    },
+                )
+                db.commit()
+            else:
+                session.state = ConversationState.awaiting_caregiver_name
+                session.data = {"flow": "caregiver", "caregiver_language": self._preferred_language(db, contact, session)}
+                db.commit()
+                return WhatsAppReply("Please save your caregiver profile first. What is your name?")
+
+        if caregiver is None:
+            session.state = ConversationState.awaiting_caregiver_name
+            session.data = {"flow": "caregiver", "caregiver_language": self._preferred_language(db, contact, session)}
+            db.commit()
+            return WhatsAppReply("Please save your caregiver profile first. What is your name?")
+
+        if not session.data.get("recipient"):
+            options = self._caregiver_elderly_options(db, caregiver)
+            if not options:
+                return WhatsAppReply("Please add an elderly profile first, then upload the HealthHub appointment screenshot.")
+            if len(options) > 1:
+                session.state = ConversationState.awaiting_elderly_selection
+                session.data = {
+                    "booking_options": options,
+                    "caregiver_language": caregiver.preferred_language,
+                    "pending_ocr_image_url": media_url,
+                }
+                db.commit()
+                return WhatsAppReply(
+                    self._elderly_selection_text(
+                        options,
+                        prefix="I received the HealthHub screenshot. Choose the elderly profile first.",
+                    )
+                )
+            option = options[0]
+            session.data = {
+                **session.data,
+                "recipient": option["phone_number"],
+                "elderly_language": option.get("preferred_language") or "english",
+                "booking_elderly_name": option["name"],
+                "caregiver_language": caregiver.preferred_language,
+            }
+
+        extracted = self.ocr.parse_healthhub_screenshot(media_url)
+        if not any(extracted.values()):
+            if getattr(self.ocr, "last_error", None) in {"http_401", "missing_config"}:
+                return WhatsAppReply(
+                    "I could not read the screenshot because the OCR service is not configured correctly right now. "
+                    "Please type the appointment date and time manually."
+                )
+            return WhatsAppReply(
+                "I could not extract appointment details from that image. Please type the appointment date and time manually."
+            )
+
+        appointment_time_text = extracted.get("appointment_time")
+        appointment_location = _ocr_appointment_location(extracted)
+        scheduled_at = _parse_ocr_appointment_time(appointment_time_text, self.settings.service_timezone)
+
+        session.data = {
+            **session.data,
+            "ocr_image_url": media_url,
+            "ocr_extracted": extracted,
+        }
+
+        if scheduled_at is not None:
+            session.data = {**session.data, "scheduled_at": scheduled_at.isoformat()}
+            if appointment_location:
+                session.data = {**session.data, "appointment_location": appointment_location}
+                session.state = ConversationState.awaiting_confirmation
+                db.commit()
+                return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, appointment_location))
+            session.state = ConversationState.awaiting_appointment_location
+            db.commit()
+            return WhatsAppReply(
+                "I found the appointment time as "
+                f"{_format_singapore_datetime(scheduled_at)}.\n"
+                "Where is the appointment? Reply with the clinic or hospital name and address."
+            )
+
+        if appointment_location:
+            session.data = {**session.data, "appointment_location": appointment_location}
+            session.state = ConversationState.awaiting_time
+            db.commit()
+            return WhatsAppReply(
+                f"I found the appointment place as {appointment_location}.\n"
+                "Please type the appointment date and time in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm."
+            )
+
+        session.state = ConversationState.awaiting_time
+        db.commit()
+        return WhatsAppReply(
+            "I could not find the appointment date and place in that image. Please type the appointment date and time in Singapore time."
+        )
+
     def _handle_existing_schedule_flow(
         self, db: Session, contact: Contact, session: ConversationSession, text: str, lowered: str
     ) -> WhatsAppReply | None:
@@ -324,6 +446,7 @@ class ConversationEngine:
             if selected is None:
                 return WhatsAppReply(self._elderly_selection_text(session.data.get("booking_options", []), prefix="Please choose a valid elderly profile."))
             option = session.data["booking_options"][selected - 1]
+            pending_ocr_image_url = session.data.get("pending_ocr_image_url")
             session.data = {
                 **session.data,
                 "recipient": option["phone_number"],
@@ -332,6 +455,8 @@ class ConversationEngine:
             }
             session.state = ConversationState.awaiting_time
             db.commit()
+            if pending_ocr_image_url:
+                return self._handle_ocr_upload(db, contact, session, pending_ocr_image_url)
             return WhatsAppReply(
                 f"Book an appointment for {option['name']}.\nWhen is the appointment date? Reply in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm."
             )
@@ -367,15 +492,7 @@ class ConversationEngine:
             session.state = ConversationState.awaiting_confirmation
             db.commit()
             scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
-            reminder_at = scheduled_at - timedelta(hours=2)
-            return WhatsAppReply(
-                "Confirm appointment for "
-                f"{session.data.get('booking_elderly_name', session.data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
-                f"Appointment place: {text}. "
-                f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
-                "Reply YES to confirm or CANCEL to stop.",
-                content_sid=self.settings.twilio_yes_no_content_sid or None,
-            )
+            return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, text), content_sid=self.settings.twilio_yes_no_content_sid or None)
 
         if session.state == ConversationState.awaiting_confirmation:
             if lowered in {"yes", "y", "confirm", "1"}:
@@ -415,15 +532,7 @@ class ConversationEngine:
                 session.data = {**session.data, "appointment_location": text}
                 db.commit()
                 scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
-                reminder_at = scheduled_at - timedelta(hours=2)
-                return WhatsAppReply(
-                    "Confirm appointment for "
-                    f"{session.data.get('booking_elderly_name', session.data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
-                    f"Appointment place: {text}. "
-                    f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
-                    "Reply YES to confirm or CANCEL to stop.",
-                    content_sid=self.settings.twilio_yes_no_content_sid or None,
-                )
+                return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, text), content_sid=self.settings.twilio_yes_no_content_sid or None)
             return WhatsAppReply("Reply YES to confirm or CANCEL to stop.")
 
         return None
@@ -496,6 +605,9 @@ class ConversationEngine:
         contact.display_name = caregiver.name
         return caregiver
 
+    def _caregiver_profile(self, db: Session, contact: Contact) -> CaregiverProfile | None:
+        return db.scalar(select(CaregiverProfile).where(CaregiverProfile.contact_id == contact.id))
+
     def _start_add_elderly(self, db: Session, contact: Contact, session: ConversationSession) -> WhatsAppReply:
         if contact.role != ContactRole.caregiver:
             return WhatsAppReply("Only caregiver accounts can add another elderly profile.")
@@ -547,6 +659,28 @@ class ConversationEngine:
         db.commit()
         return WhatsAppReply("Let's save your caregiver profile first. What is your name?")
 
+    def _caregiver_elderly_options(self, db: Session, caregiver: CaregiverProfile) -> list[dict[str, str]]:
+        elderly_profiles = (
+            db.scalars(
+                select(ElderlyProfile)
+                .join(CaregiverElderlyLink, CaregiverElderlyLink.elderly_profile_id == ElderlyProfile.id)
+                .where(CaregiverElderlyLink.caregiver_profile_id == caregiver.id)
+                .order_by(ElderlyProfile.created_at.asc())
+            )
+            .all()
+        )
+        return [_elderly_booking_option(profile) for profile in elderly_profiles]
+
+    def _appointment_confirmation_text(self, data: dict, scheduled_at: datetime, appointment_location: str) -> str:
+        reminder_at = scheduled_at - timedelta(hours=2)
+        return (
+            "Confirm appointment for "
+            f"{data.get('booking_elderly_name', data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
+            f"Appointment place: {appointment_location}. "
+            f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
+            "Reply YES to confirm or CANCEL to stop."
+        )
+
     def _elderly_selection_text(self, options: list[dict], prefix: str | None = None) -> str:
         lines = ["Book an appointment. Choose the elderly profile:"]
         if prefix:
@@ -576,6 +710,10 @@ class ConversationEngine:
                 lines.append(
                     f"Elderly: {profile.name}, {profile.phone_number}, {profile.postal_code}, {profile.mobility_level.value}"
                 )
+                if profile.appointment_time_text:
+                    lines.append(f"Appointment: {profile.appointment_time_text}")
+                if profile.transport_mode_preference:
+                    lines.append(f"Transport: {profile.transport_mode_preference}")
             return "\n".join(lines)
 
         elderly = db.scalar(select(ElderlyProfile).where(ElderlyProfile.contact_id == contact.id))
@@ -586,7 +724,10 @@ class ConversationEngine:
             f"Phone: {elderly.phone_number}\n"
             f"Pickup: {elderly.pickup_address} {elderly.postal_code}\n"
             f"Language: {elderly.preferred_language}\n"
-            f"Mobility: {elderly.mobility_level.value}"
+            f"Mobility: {elderly.mobility_level.value}\n"
+            f"Dialects: {elderly.dialects or '-'}\n"
+            f"Transport: {elderly.transport_mode_preference or '-'}\n"
+            f"Appointment: {elderly.appointment_time_text or '-'}"
         )
 
     def _pending_profile_summary(self, contact: Contact, data: dict) -> str:
@@ -791,6 +932,51 @@ def _parse_mobility(value: str) -> MobilityLevel | None:
         "needs escort support": MobilityLevel.escort_support,
         "escort support": MobilityLevel.escort_support,
     }.get(normalized)
+
+
+def _ocr_appointment_location(extracted: dict) -> str | None:
+    location_parts = []
+    for key in ("appointment_location", "clinic", "department"):
+        value = (extracted.get(key) or "").strip()
+        if value and value not in location_parts:
+            location_parts.append(value)
+    return ", ".join(location_parts) or None
+
+
+def _parse_ocr_appointment_time(value: str | None, timezone_name: str) -> datetime | None:
+    if not value:
+        return None
+
+    normalized = re.sub(r"\s+", " ", value.replace(",", " ")).strip()
+    normalized = re.sub(r"\b([AP])\.?M\.?\b", lambda match: match.group(1).lower() + "m", normalized, flags=re.IGNORECASE)
+    candidates = [normalized]
+
+    date_first = re.search(
+        r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4}).*?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if date_first:
+        candidates.append(
+            f"{date_first.group(1)} {date_first.group(2)} {date_first.group(3)} {date_first.group(4)}"
+        )
+
+    month_first = re.search(
+        r"\b([A-Za-z]{3,9})\s+(\d{1,2})\s+(\d{4}).*?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if month_first:
+        candidates.append(
+            f"{month_first.group(2)} {month_first.group(1)} {month_first.group(3)} {month_first.group(4)}"
+        )
+
+    for candidate in candidates:
+        try:
+            return parse_singapore_time(candidate, timezone_name)
+        except SingaporeTimeParseError:
+            continue
+    return None
 
 
 def _is_postal_code(value: str) -> bool:

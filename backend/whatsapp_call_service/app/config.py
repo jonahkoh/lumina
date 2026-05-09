@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "backend/whatsapp_call_service/.env"),
+        env_file=(".env", "../../.env", "backend/whatsapp_call_service/.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
@@ -34,8 +34,16 @@ class Settings(BaseSettings):
     sea_lion_api_key: str = Field(default="", validation_alias=AliasChoices("SEA_LION_API_KEY", "API_KEY"))
     sea_lion_api_url: str = Field(default="", validation_alias=AliasChoices("SEA_LION_API_URL", "API_URL"))
     sea_lion_model_name: str = Field(default="", validation_alias=AliasChoices("SEA_LION_MODEL_NAME", "MODEL_NAME"))
+    sea_lion_vision_model_name: str = "aisingapore/Qwen-SEA-LION-v4-8B-VL"
+    healthhub_ocr_prompt: str = (
+        "You are an expert OCR and data extraction assistant for Singapore healthcare apps. "
+        "Extract only appointment booking details from the HealthHub screenshot into JSON: "
+        "patient_name, appointment_time, appointment_location, clinic, department, doctor. "
+        "Use appointment_location for the clinic, hospital, department, or address where the appointment happens. "
+        "If a field is not visible, use null. Do not include NRIC or other sensitive identifiers."
+    )
     translation_cache_max_size: int = 1024
-    elevenlabs_api_key: str = ""
+    elevenlabs_api_key: str = Field(default="", validation_alias=AliasChoices("ELEVENLABS_API_KEY", "ELEVEN_API_KEY"))
     elevenlabs_tts_model_id: str = "eleven_multilingual_v2"
     audio_cache_dir: str = "assets/audio_cache"
     english_voice_id: str = "FXMPPfJPpDj0GSwJ6ASO"

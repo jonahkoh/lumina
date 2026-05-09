@@ -87,6 +87,11 @@ class ElderlyProfileCreate(BaseModel):
     postal_code: str = Field(..., min_length=6, max_length=6)
     preferred_language: str = "english"
     mobility_level: MobilityLevel = MobilityLevel.need_transport
+    citizenship: str | None = None
+    income_level: str | None = None
+    dialects: str | None = None
+    transport_mode_preference: str | None = None
+    appointment_time_text: str | None = None
     notes: str | None = None
 
 
@@ -100,6 +105,11 @@ class ElderlyProfileResponse(BaseModel):
     postal_code: str
     preferred_language: str
     mobility_level: MobilityLevel
+    citizenship: str | None = None
+    income_level: str | None = None
+    dialects: str | None = None
+    transport_mode_preference: str | None = None
+    appointment_time_text: str | None = None
     notes: str | None = None
 
     model_config = {"from_attributes": True}

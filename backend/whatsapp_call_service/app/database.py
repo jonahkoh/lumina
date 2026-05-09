@@ -47,6 +47,11 @@ def _apply_lightweight_migrations() -> None:
         if "scheduled_calls" in inspector.get_table_names()
         else set()
     )
+    elderly_columns = (
+        {column["name"] for column in inspector.get_columns("elderly_profiles")}
+        if "elderly_profiles" in inspector.get_table_names()
+        else set()
+    )
     with engine.begin() as connection:
         if "role" not in contact_columns:
             connection.execute(text("ALTER TABLE contacts ADD COLUMN role VARCHAR(32)"))
@@ -58,3 +63,13 @@ def _apply_lightweight_migrations() -> None:
             connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN appointment_location TEXT"))
         if "language" not in scheduled_call_columns:
             connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN language VARCHAR(64) DEFAULT 'english'"))
+        if "citizenship" not in elderly_columns:
+            connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN citizenship VARCHAR(128)"))
+        if "income_level" not in elderly_columns:
+            connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN income_level VARCHAR(128)"))
+        if "dialects" not in elderly_columns:
+            connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN dialects TEXT"))
+        if "transport_mode_preference" not in elderly_columns:
+            connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN transport_mode_preference VARCHAR(128)"))
+        if "appointment_time_text" not in elderly_columns:
+            connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN appointment_time_text TEXT"))

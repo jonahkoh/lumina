@@ -74,6 +74,11 @@ def create_elderly_profile(payload: ElderlyProfileCreate, db: Session = Depends(
         postal_code=_validate_postal_code(payload.postal_code),
         preferred_language=payload.preferred_language.strip().lower(),
         mobility_level=payload.mobility_level,
+        citizenship=payload.citizenship,
+        income_level=payload.income_level,
+        dialects=payload.dialects,
+        transport_mode_preference=payload.transport_mode_preference,
+        appointment_time_text=payload.appointment_time_text,
         notes=payload.notes,
     )
     db.add(profile)

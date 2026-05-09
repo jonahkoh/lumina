@@ -12,6 +12,7 @@ FastAPI microservice for Twilio WhatsApp messaging and scheduled outbound Voice 
 - Run an API process and a separate worker process.
 - Execute due calls with Twilio Voice and return TwiML that plays one configured static audio URL or a generated ElevenLabs audio clip.
 - Translate chatbot messages, scheduled WhatsApp reminders, and outbound call text with SEA-LION when a user has a non-English preferred language.
+- Parse HealthHub screenshots with SEA-LION vision to prefill appointment time and place during booking.
 - Cache common translations and generated audio clips to reduce repeat SEA-LION and ElevenLabs calls.
 
 Twilio `<Play>` does not support MP4 audio directly. Configure `TWILIO_STATIC_CALL_AUDIO_URL` as a public MP3/WAV/AIFF/GSM/u-law URL.
@@ -47,6 +48,7 @@ Optional translation and audio settings:
 SEA_LION_API_KEY=...
 SEA_LION_API_URL=...
 SEA_LION_MODEL_NAME=...
+SEA_LION_VISION_MODEL_NAME=Qwen-SEA-LION-v4-8B-VL
 ELEVENLABS_API_KEY=...
 AUDIO_CACHE_DIR=assets/audio_cache
 ```
@@ -124,7 +126,7 @@ Existing commands:
 - `schedule`: start the existing call scheduling flow.
 - `/reset`: remove your saved bot profile data, conversation state, and pending reminder calls, then start again.
 
-If `MediaUrl0` is received, the bot asks the user to type appointment details manually.
+If a caregiver sends a HealthHub screenshot during appointment booking, the bot attempts OCR extraction for the appointment time and place. It does not create or update elderly profiles from OCR. If multiple elderly profiles exist, the caregiver chooses the profile first, then the screenshot is used to prefill the booking confirmation.
 
 WhatsApp button templates are optional. Configure Content SIDs if available; numbered text fallback always works.
 
@@ -136,6 +138,8 @@ WhatsApp button templates are optional. Configure Content SIDs if available; num
 4. Bot asks where the appointment is, for example the clinic or hospital name and address.
 5. User replies `YES`.
 6. Worker sends a localized WhatsApp reminder and creates the caregiver reminder call for 2 hours before the appointment, including the appointment time and destination.
+
+Instead of typing steps 3 and 4 manually, the caregiver can upload a HealthHub appointment screenshot after choosing the elderly profile. SEA-LION vision extracts the appointment time and place, and the bot moves directly to confirmation when both fields are found.
 
 Send `cancel` during the flow to stop, or after scheduling to cancel the latest pending call created by that WhatsApp user.
 

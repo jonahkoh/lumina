@@ -40,6 +40,7 @@ class ConversationState(str, enum.Enum):
     awaiting_time = "awaiting_time"
     awaiting_appointment_location = "awaiting_appointment_location"
     awaiting_confirmation = "awaiting_confirmation"
+    awaiting_ocr_confirmation = "awaiting_ocr_confirmation"
 
 
 class ContactRole(str, enum.Enum):
@@ -153,6 +154,11 @@ class ElderlyProfile(Base):
     postal_code: Mapped[str] = mapped_column(String(16), index=True)
     preferred_language: Mapped[str] = mapped_column(String(64), default="english")
     mobility_level: Mapped[MobilityLevel] = mapped_column(Enum(MobilityLevel), default=MobilityLevel.need_transport)
+    citizenship: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    income_level: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    dialects: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport_mode_preference: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    appointment_time_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
