@@ -2,7 +2,7 @@ import json
 import math
 import uuid
 from datetime import datetime as dt_class, timezone
-from typing import List
+from typing import List, Optional
 
 from confluent_kafka import Producer
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -135,6 +135,18 @@ async def get_available_escorts(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _, r in scored]
+
+
+@router.get("", response_model=List[EscortResponse])
+async def list_escorts(
+    provider_id: Optional[uuid.UUID] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Escort)
+    if provider_id:
+        query = query.where(Escort.provider_id == provider_id)
+    result = await db.execute(query)
+    return result.scalars().all()
 
 
 @router.get("/{escort_id}", response_model=EscortResponse)

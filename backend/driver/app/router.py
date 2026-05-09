@@ -130,6 +130,18 @@ async def get_available_drivers(
     return [r for _, r in scored]
 
 
+@router.get("", response_model=List[DriverResponse])
+async def list_drivers(
+    provider_id: Optional[uuid.UUID] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Driver)
+    if provider_id:
+        query = query.where(Driver.provider_id == provider_id)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
 @router.get("/{driver_id}", response_model=DriverResponse)
 async def get_driver(driver_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     return await _get_driver_or_404(driver_id, db)
