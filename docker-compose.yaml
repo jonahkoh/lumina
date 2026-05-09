@@ -123,5 +123,29 @@ services:
       POSTGRES_HOST: postgres
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
+  transport-service:
+    build:
+      context: .
+      dockerfile: backend/transport/Dockerfile
+    container_name: transport-service
+    networks:
+      - eldercare-net
+    depends_on:
+      - kafka
+      - redis
+      - driver-service
+      - escort-service
+      - trip-audit-service
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/transport/.env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379/0
+      DRIVER_SERVICE_URL: http://driver-service:8001
+      ESCORT_SERVICE_URL: http://escort-service:8002
+      TRIP_AUDIT_SERVICE_URL: http://trip-audit-service:8003
+
 volumes:
   postgres_data:
