@@ -11,9 +11,18 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.kafka_client import publish
-from app.matching import match_trip, pop_next_driver, pop_next_escort
+from app.matching import (
+    cleanup_trip_redis,
+    get_trip_assignment,
+    get_trip_composition,
+    is_trip_complete,
+    match_trip,
+    pop_next_driver,
+    pop_next_escort,
+    update_trip_composition,
+)
 from app.router import router
-from app.schemas import TripRequest, Location
+from app.schemas import Location, TripRequest
 
 logger = logging.getLogger(__name__)
 
@@ -183,12 +192,53 @@ async def _handle_escort_reaching(data: dict) -> None:
     logger.info("Escort reaching for trip %s", trip_id)
 
 
+async def _publish_completed(trip_id_str: str, completed_at: str, source_data: dict) -> None:
+    """Build and publish trip.completed once both parties have confirmed."""
+    trip_id = uuid.UUID(trip_id_str)
+    composition = await get_trip_composition(trip_id)
+    assignment = await get_trip_assignment(trip_id)
+    driver_id = assignment.get("driver_id") if assignment else None
+    escort_id = assignment.get("escort_id") if assignment else None
+
+    publish("trip.completed", {
+        "trip_id": trip_id_str,
+        "driver_id": driver_id,
+        "escort_id": escort_id,
+        "trip_type": composition["trip_type"] if composition else None,
+        "completed_at": completed_at,
+        "photo_url": source_data.get("photo_url"),
+        "dropoff_confirmed": source_data.get("dropoff_confirmed"),
+    })
+    await _notify_met(
+        f"/internal/trips/{trip_id_str}/completed",
+        {"trip_id": trip_id_str, "completed_at": completed_at},
+    )
+    await cleanup_trip_redis(trip_id)
+    logger.info("trip.completed published for %s", trip_id_str)
+
+
+async def _handle_completed_driver(data: dict) -> None:
+    trip_id = uuid.UUID(str(data["trip_id"]))
+    await update_trip_composition(trip_id, driver_confirmed=True)
+    if await is_trip_complete(trip_id):
+        await _publish_completed(str(trip_id), data.get("completed_at", _now_iso()), data)
+
+
+async def _handle_completed_escort(data: dict) -> None:
+    trip_id = uuid.UUID(str(data["trip_id"]))
+    await update_trip_composition(trip_id, escort_confirmed=True)
+    if await is_trip_complete(trip_id):
+        await _publish_completed(str(trip_id), data.get("completed_at", _now_iso()), data)
+
+
 _HANDLERS = {
     "trip.requested": _handle_trip_requested,
     "trip.accepted.driver": _handle_trip_accepted_driver,
     "trip.rejected.driver": _handle_trip_rejected_driver,
     "trip.driver_reaching": _handle_driver_reaching,
     "trip.escort_reaching": _handle_escort_reaching,
+    "trip.completed.driver": _handle_completed_driver,
+    "trip.completed.escort": _handle_completed_escort,
 }
 
 

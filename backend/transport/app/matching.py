@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from typing import Optional
 
@@ -8,7 +9,8 @@ import redis.asyncio as aioredis
 from app.config import settings
 from app.schemas import DriverMatch, EscortMatch, MatchResult, TripNeeds, TripRequest
 
-_CANDIDATE_TTL = 10800  # 3 hours
+_CANDIDATE_TTL = 10800   # 3 hours
+_COMPOSITION_TTL = 43200  # 12 hours
 
 
 def _vehicle_type_from_flags(mobility_flags: list[str]) -> str:
@@ -115,6 +117,96 @@ async def pop_next_escort(trip_id: uuid.UUID) -> Optional[str]:
         return await r.lpop(f"candidates:escort:{trip_id}")
 
 
+# ── composition + assignment helpers ─────────────────────────────────────────
+
+async def get_trip_composition(trip_id: uuid.UUID) -> Optional[dict]:
+    async with _redis() as r:
+        raw = await r.get(f"trip:composition:{trip_id}")
+    return json.loads(raw) if raw else None
+
+
+async def update_trip_composition(
+    trip_id: uuid.UUID,
+    driver_confirmed: Optional[bool] = None,
+    escort_confirmed: Optional[bool] = None,
+) -> None:
+    async with _redis() as r:
+        raw = await r.get(f"trip:composition:{trip_id}")
+        if not raw:
+            return
+        composition = json.loads(raw)
+        if driver_confirmed is not None:
+            composition["driver_confirmed"] = driver_confirmed
+        if escort_confirmed is not None:
+            composition["escort_confirmed"] = escort_confirmed
+        await r.set(f"trip:composition:{trip_id}", json.dumps(composition))
+        await r.expire(f"trip:composition:{trip_id}", _COMPOSITION_TTL)
+
+
+async def is_trip_complete(trip_id: uuid.UUID) -> bool:
+    composition = await get_trip_composition(trip_id)
+    if composition is None:
+        return False
+    trip_type = composition.get("trip_type")
+    if trip_type == "DRIVER_ONLY":
+        return bool(composition.get("driver_confirmed"))
+    if trip_type == "ESCORT_ONLY":
+        return bool(composition.get("escort_confirmed"))
+    if trip_type == "COMBINED":
+        return bool(composition.get("driver_confirmed") and composition.get("escort_confirmed"))
+    return False
+
+
+async def get_trip_assignment(trip_id: uuid.UUID) -> Optional[dict]:
+    async with _redis() as r:
+        raw = await r.get(f"trip:assignment:{trip_id}")
+    return json.loads(raw) if raw else None
+
+
+async def cleanup_trip_redis(trip_id: uuid.UUID) -> None:
+    async with _redis() as r:
+        await r.delete(
+            f"trip:composition:{trip_id}",
+            f"trip:assignment:{trip_id}",
+            f"candidates:driver:{trip_id}",
+            f"candidates:escort:{trip_id}",
+        )
+
+
+async def _store_composition_and_assignment(
+    trip_id: uuid.UUID,
+    driver: Optional[DriverMatch],
+    escort: Optional[EscortMatch],
+) -> None:
+    has_driver = driver is not None
+    has_escort = escort is not None
+
+    if has_driver and has_escort:
+        trip_type = "COMBINED"
+    elif has_driver:
+        trip_type = "DRIVER_ONLY"
+    else:
+        trip_type = "ESCORT_ONLY"
+
+    composition = {
+        "trip_type": trip_type,
+        "requires_driver": has_driver,
+        "requires_escort": has_escort,
+        "driver_confirmed": False,
+        "escort_confirmed": False,
+    }
+    assignment = {
+        "driver_id": str(driver.driver_id) if driver else None,
+        "escort_id": str(escort.escort_id) if escort else None,
+    }
+
+    async with _redis() as r:
+        await r.set(f"trip:composition:{trip_id}", json.dumps(composition))
+        await r.expire(f"trip:composition:{trip_id}", _COMPOSITION_TTL)
+        await r.set(f"trip:assignment:{trip_id}", json.dumps(assignment))
+        await r.expire(f"trip:assignment:{trip_id}", _COMPOSITION_TTL)
+
+
 async def match_trip(trip_request: TripRequest) -> MatchResult:
     needs = TripNeeds(
         trip_id=trip_request.trip_id,
@@ -140,6 +232,8 @@ async def match_trip(trip_request: TripRequest) -> MatchResult:
     driver = drivers[0]
     escort = escorts[0]
     vehicle_type = _vehicle_type_from_flags(trip_request.mobility_flags)
+
+    await _store_composition_and_assignment(trip_request.trip_id, driver, escort)
 
     return MatchResult(
         success=True,

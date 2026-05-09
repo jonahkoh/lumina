@@ -13,13 +13,15 @@ def test_kafka_config_no_sasl():
     assert "security.protocol" not in cfg
 
 
-def test_handlers_cover_all_five_topics():
-    """_HANDLERS must contain exactly the five expected Kafka topics."""
+def test_handlers_cover_all_seven_topics():
+    """_HANDLERS must contain all seven expected Kafka topics including completion ones."""
     expected = {
         "trip.requested",
         "trip.accepted.driver",
         "trip.rejected.driver",
         "trip.driver_reaching",
         "trip.escort_reaching",
+        "trip.completed.driver",
+        "trip.completed.escort",
     }
     assert set(_HANDLERS.keys()) == expected
