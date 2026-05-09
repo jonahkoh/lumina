@@ -14,6 +14,12 @@ class AuditOutcome(str, enum.Enum):
     CANCELLED = "CANCELLED"
 
 
+class TripType(str, enum.Enum):
+    DRIVER_ONLY = "DRIVER_ONLY"
+    ESCORT_ONLY = "ESCORT_ONLY"
+    COMBINED = "COMBINED"
+
+
 class TripAudit(Base):
     __tablename__ = "trip_audits"
 
@@ -36,6 +42,7 @@ class TripAudit(Base):
     dropoff_confirmed = Column(Boolean, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
+    trip_type = Column(SAEnum(TripType, name="triptype"), nullable=True)
     reason = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

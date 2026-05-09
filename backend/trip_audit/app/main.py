@@ -9,7 +9,7 @@ from confluent_kafka import Consumer, KafkaError
 from fastapi import FastAPI
 
 from app.database import AsyncSessionLocal, Base, engine, settings
-from app.models import AuditOutcome
+from app.models import AuditOutcome, TripType
 from app.router import _write_audit, router
 from app.schemas import TripAuditCreate
 
@@ -48,6 +48,13 @@ def _parse_dt(val: str | None) -> datetime | None:
         return None
 
 
+def _parse_trip_type(val: str | None) -> TripType | None:
+    try:
+        return TripType(val) if val else None
+    except ValueError:
+        return None
+
+
 async def _handle_completed(data: dict) -> None:
     body = TripAuditCreate(
         trip_id=uuid.UUID(str(data["trip_id"])),
@@ -64,6 +71,7 @@ async def _handle_completed(data: dict) -> None:
         photo_url=data.get("photo_url"),
         dropoff_confirmed=data.get("dropoff_confirmed"),
         completed_at=_parse_dt(data.get("completed_at")),
+        trip_type=_parse_trip_type(data.get("trip_type")),
     )
     async with AsyncSessionLocal() as db:
         await _write_audit(body, db)

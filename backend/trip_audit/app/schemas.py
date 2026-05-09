@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.models import AuditOutcome
+from app.models import AuditOutcome, TripType
 
 
 class TripAuditCreate(BaseModel):
@@ -26,6 +26,7 @@ class TripAuditCreate(BaseModel):
     dropoff_confirmed: Optional[bool] = None
     completed_at: Optional[datetime] = None
 
+    trip_type: Optional[TripType] = None
     reason: Optional[str] = None
 
 
@@ -49,6 +50,7 @@ class TripAuditResponse(BaseModel):
     dropoff_confirmed: Optional[bool] = None
     completed_at: Optional[datetime] = None
 
+    trip_type: Optional[TripType] = None
     reason: Optional[str] = None
 
     created_at: datetime
