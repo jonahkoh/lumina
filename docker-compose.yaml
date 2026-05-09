@@ -105,5 +105,23 @@ services:
       POSTGRES_HOST: postgres
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
+  trip-audit-service:
+    build:
+      context: .
+      dockerfile: backend/trip_audit/Dockerfile
+    container_name: trip-audit-service
+    networks:
+      - eldercare-net
+    depends_on:
+      - kafka
+      - postgres
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
 volumes:
   postgres_data:
