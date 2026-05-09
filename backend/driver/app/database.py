@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_API_KEY: str = ""
+    KAFKA_API_SECRET: str = ""
+
     model_config = SettingsConfigDict(env_file=_find_env_file(), extra="ignore")
 
 
