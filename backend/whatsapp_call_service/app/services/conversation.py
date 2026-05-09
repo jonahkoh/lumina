@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import logging
 import re
 from zoneinfo import ZoneInfo
 
@@ -25,12 +26,15 @@ from app.services.scheduler import schedule_call
 from app.services.singapore_time import SingaporeTimeParseError, parse_singapore_time
 from app.services.translation_service import TranslationService
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class WhatsAppReply:
     body: str
     content_sid: str | None = None
     content_variables: dict[str, str] = field(default_factory=dict)
+    language_override: str | None = None
 
 
 class ConversationEngine:
@@ -66,13 +70,29 @@ class ConversationEngine:
         body_text = _normalize_command(body)
         text = body_text if is_reset_command(body_text) else _normalize_command(button_payload or button_text or body)
         lowered = text.lower()
+        logger.info(
+            "conversation inbound from=%s state=%s role=%s command=%s",
+            contact.whatsapp_address,
+            session.state.value,
+            contact.role.value if contact.role else None,
+            lowered[:32],
+        )
 
         if media_url:
             return WhatsAppReply("Image parsing is not ready yet. Please type the appointment details.")
 
         if is_reset_command(lowered):
+            previous_language = self._preferred_language(db, contact, session)
+            logger.info("conversation reset from=%s previous_language=%s", contact.whatsapp_address, previous_language)
             self._reset_contact_data(db, contact, session)
-            return self._language_prompt(prefix="Reset complete. I removed your saved bot profile data and conversation.")
+            reset_session = self._get_or_create_session(db, contact)
+            reset_session.state = ConversationState.awaiting_role
+            reset_session.data = {"awaiting_start_language": True}
+            db.commit()
+            return WhatsAppReply(
+                "Reset complete. I removed your saved bot profile data and conversation.",
+                language_override=previous_language,
+            )
 
         if lowered in {"restart profile", "reset profile"}:
             contact.role = None
@@ -87,7 +107,7 @@ class ConversationEngine:
                 language = _parse_start_language(text)
                 if language is None:
                     db.commit()
-                    return self._language_prompt(prefix="Please choose a language option.")
+                    return self._language_prompt(prefix="Please choose a language option.", language_override="english")
                 session.state = ConversationState.awaiting_role
                 session.data = {"start_language": language}
                 contact.language_preference = language
@@ -97,7 +117,7 @@ class ConversationEngine:
                 session.state = ConversationState.awaiting_role
                 session.data = {"awaiting_start_language": True}
                 db.commit()
-                return self._language_prompt()
+                return self._language_prompt(language_override="english")
             return self._start_caregiver_onboarding(db, contact, session)
 
         if lowered in {"help", "menu"}:
@@ -134,7 +154,8 @@ class ConversationEngine:
     def _localize_reply(
         self, db: Session, contact: Contact, session: ConversationSession, reply: WhatsAppReply
     ) -> WhatsAppReply:
-        language = self._preferred_language(db, contact, session)
+        language = reply.language_override or self._preferred_language(db, contact, session)
+        logger.info("conversation localize from=%s language=%s", contact.whatsapp_address, language)
         if self.translation.normalize_language(language) == "english":
             return reply
 
@@ -143,6 +164,7 @@ class ConversationEngine:
             body=localized_body,
             content_sid=None,
             content_variables=reply.content_variables,
+            language_override=reply.language_override,
         )
 
     def _localize_body(self, body: str, language: str) -> str:
@@ -596,11 +618,11 @@ class ConversationEngine:
             body = f"{prefix}\n{body}"
         return WhatsAppReply(body, content_sid=self.settings.twilio_role_menu_content_sid or None)
 
-    def _language_prompt(self, prefix: str | None = None) -> WhatsAppReply:
+    def _language_prompt(self, prefix: str | None = None, language_override: str | None = None) -> WhatsAppReply:
         body = "What language should we use with you?\n1. English\n2. Mandarin\n3. Malay\n4. Tamil"
         if prefix:
             body = f"{prefix}\n{body}"
-        return WhatsAppReply(body)
+        return WhatsAppReply(body, language_override=language_override)
 
     def _mobility_prompt(self, prefix: str | None = None) -> WhatsAppReply:
         body = "Mobility level?\n1. Need transport\n2. Need escort\n3. Need both"
@@ -679,6 +701,7 @@ class ConversationEngine:
         db.delete(session)
         contact.role = None
         contact.display_name = None
+        contact.language_preference = "english"
         db.commit()
 
 

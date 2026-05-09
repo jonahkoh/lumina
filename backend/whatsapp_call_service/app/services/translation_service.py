@@ -118,6 +118,62 @@ STATIC_TEMPLATE_TRANSLATIONS = {
 }
 
 
+EXTRA_STATIC_TRANSLATIONS = {
+    "mandarin": {
+        "Reset complete. I removed your saved bot profile data and conversation.": "\u91cd\u7f6e\u5b8c\u6210\u3002\u6211\u5df2\u5220\u9664\u60a8\u4fdd\u5b58\u7684\u673a\u5668\u4eba\u8d44\u6599\u548c\u5bf9\u8bdd\u3002",
+        "What language should we use with you?": "\u8bf7\u95ee\u60a8\u60f3\u7528\u4ec0\u4e48\u8bed\u8a00\uff1f",
+        "English": "\u82f1\u8bed",
+        "Mandarin": "\u534e\u8bed",
+        "Malay": "\u9a6c\u6765\u8bed",
+        "Tamil": "\u6de1\u7c73\u5c14\u8bed",
+    },
+    "malay": {
+        "Reset complete. I removed your saved bot profile data and conversation.": "Tetapan semula selesai. Saya telah memadam data profil bot dan perbualan anda yang disimpan.",
+        "What language should we use with you?": "Bahasa apakah yang patut kami gunakan dengan anda?",
+        "English": "Bahasa Inggeris",
+        "Mandarin": "Mandarin",
+        "Malay": "Bahasa Melayu",
+        "Tamil": "Tamil",
+        "Please choose a language option.": "Sila pilih pilihan bahasa.",
+        "Please choose a valid mobility option.": "Sila pilih pilihan mobiliti yang sah.",
+        "Please confirm this profile:": "Sila sahkan profil ini:",
+        "Reply YES to save, or EDIT to restart.": "Balas YES untuk simpan, atau EDIT untuk mula semula.",
+        "Reply YES to save this profile, or EDIT to restart.": "Balas YES untuk simpan profil ini, atau EDIT untuk mula semula.",
+        "Please tell me where the appointment is.": "Sila beritahu saya di mana janji temu itu.",
+        "Reply YES to confirm or CANCEL to stop.": "Balas YES untuk sahkan atau CANCEL untuk berhenti.",
+        "Cancelled the current flow.": "Aliran semasa telah dibatalkan.",
+        "Cancelled the scheduling flow.": "Aliran penjadualan telah dibatalkan.",
+        "What date and time is the appointment? Reply in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm.": "Apakah tarikh dan masa janji temu? Balas dalam masa Singapura, contohnya today 3pm, tomorrow 9:30am, atau 9 May 2026 3:30pm.",
+        "When is the appointment date? Reply in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm.": "Bilakah tarikh janji temu? Balas dalam masa Singapura, contohnya today 3pm, tomorrow 9:30am, atau 9 May 2026 3:30pm.",
+    },
+    "tamil": {
+        "Reset complete. I removed your saved bot profile data and conversation.": "\u0bae\u0bc0\u0b9f\u0bcd\u0b9f\u0bae\u0bc8\u0baa\u0bcd\u0baa\u0bc1 \u0bae\u0bc1\u0b9f\u0bbf\u0ba8\u0bcd\u0ba4\u0ba4\u0bc1. \u0b9a\u0bc7\u0bae\u0bbf\u0ba4\u0bcd\u0ba4 \u0baa\u0bca\u0b9f\u0bcd \u0bb5\u0bbf\u0bb5\u0bb0\u0b99\u0bcd\u0b95\u0bb3\u0bcd \u0bae\u0bb1\u0bcd\u0bb1\u0bc1\u0bae\u0bcd \u0b89\u0bb0\u0bc8\u0baf\u0bbe\u0b9f\u0bb2\u0bcd \u0ba8\u0bc0\u0b95\u0bcd\u0b95\u0baa\u0bcd\u0baa\u0b9f\u0bcd\u0b9f\u0ba9.",
+        "What language should we use with you?": "\u0b89\u0b99\u0bcd\u0b95\u0bb3\u0bc1\u0b9f\u0ba9\u0bcd \u0b8e\u0ba8\u0bcd\u0ba4 \u0bae\u0bca\u0bb4\u0bbf\u0baf\u0bc8 \u0baa\u0baf\u0ba9\u0bcd\u0baa\u0b9f\u0bc1\u0ba4\u0bcd\u0ba4 \u0bb5\u0bc7\u0ba3\u0bcd\u0b9f\u0bc1\u0bae\u0bcd?",
+        "English": "\u0b86\u0b99\u0bcd\u0b95\u0bbf\u0bb2\u0bae\u0bcd",
+        "Mandarin": "\u0bae\u0bbe\u0ba3\u0bcd\u0b9f\u0bb0\u0bbf\u0ba9\u0bcd",
+        "Malay": "\u0bae\u0bb2\u0bbe\u0baf\u0bcd",
+        "Tamil": "\u0ba4\u0bae\u0bbf\u0bb4\u0bcd",
+    },
+}
+
+
+EXTRA_STATIC_TEMPLATE_TRANSLATIONS = {
+    "malay": [
+        (r"Confirm appointment for (.+) at (.+)\. Appointment place: (.+)\. We will call the caregiver 2 hours before at (.+) to remind them that the elderly person has an appointment today\. Reply YES to confirm or CANCEL to stop\.", "Sahkan janji temu untuk {0} pada {1}. Tempat janji temu: {2}. Kami akan menghubungi penjaga 2 jam sebelum pada {3} untuk mengingatkan bahawa warga emas mempunyai janji temu hari ini. Balas YES untuk sahkan atau CANCEL untuk berhenti."),
+        (r"Appointment confirmed for (.+) at (.+)\. We will call the caregiver at (.+)\.", "Janji temu untuk {0} pada {1} telah disahkan. Kami akan menghubungi penjaga pada {2}."),
+        (r"Caregiver: (.+)", "Penjaga: {0}"),
+        (r"Caregiver phone: (.+)", "Telefon penjaga: {0}"),
+        (r"Relationship: (.+)", "Hubungan: {0}"),
+        (r"Elderly: (.+)", "Warga emas: {0}"),
+        (r"Elderly phone: (.+)", "Telefon warga emas: {0}"),
+        (r"Pickup: (.+)", "Alamat pengambilan: {0}"),
+        (r"Language/dialect: (.+)", "Bahasa/dialek: {0}"),
+        (r"Mobility: (.+)", "Mobiliti: {0}"),
+        (r"Notes: (.+)", "Nota: {0}"),
+    ],
+}
+
+
 class TranslationService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -132,13 +188,19 @@ class TranslationService:
         cached = self._cache.get(key)
         if cached is not None:
             self._cache.move_to_end(key)
+            logger.info("translation cache_hit language=%s chars=%d", normalized_language, len(text))
             return cached
 
-        translated = (
-            self._translate_static(text, normalized_language)
-            or self._translate_via_sea_lion(text, normalized_language)
-            or text
-        )
+        translated = self._translate_static(text, normalized_language)
+        if translated:
+            logger.info("translation static language=%s chars=%d", normalized_language, len(text))
+        else:
+            translated = self._translate_via_sea_lion(text, normalized_language)
+            if translated:
+                logger.info("translation sea_lion language=%s chars=%d", normalized_language, len(text))
+            else:
+                logger.info("translation fallback_english language=%s chars=%d", normalized_language, len(text))
+                translated = text
         self._store(key, translated)
         return translated
 
@@ -163,9 +225,16 @@ class TranslationService:
 
     @staticmethod
     def _translate_static(text: str, target_language: str) -> str | None:
+        exact = EXTRA_STATIC_TRANSLATIONS.get(target_language, {}).get(text)
+        if exact:
+            return exact
         exact = STATIC_TRANSLATIONS.get(target_language, {}).get(text)
         if exact:
             return exact
+        for pattern, replacement in EXTRA_STATIC_TEMPLATE_TRANSLATIONS.get(target_language, []):
+            match = re.fullmatch(pattern, text)
+            if match:
+                return replacement.format(*match.groups())
         for pattern, replacement in STATIC_TEMPLATE_TRANSLATIONS.get(target_language, []):
             match = re.fullmatch(pattern, text)
             if match:
