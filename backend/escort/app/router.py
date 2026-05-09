@@ -237,6 +237,34 @@ async def reject_trip(
     return {"message": "rejected"}
 
 
+@router.post("/{escort_id}/trips/{trip_id}/complete")
+async def complete_trip(
+    escort_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    escort = await _get_escort_or_404(escort_id, db)
+
+    future_ids = [t for t in (escort.future_trip_ids or []) if t != trip_id]
+    past_ids = list(escort.past_trip_ids or [])
+    if trip_id not in past_ids:
+        past_ids.append(trip_id)
+
+    escort.future_trip_ids = future_ids
+    escort.past_trip_ids = past_ids
+    escort.status = EscortStatus.AVAILABLE
+    flag_modified(escort, "future_trip_ids")
+    flag_modified(escort, "past_trip_ids")
+    await db.commit()
+
+    _publish(_get_producer(), "trip.completed.escort", {
+        "trip_id": str(trip_id),
+        "escort_id": str(escort_id),
+        "completed_at": dt_class.now(timezone.utc).isoformat(),
+    })
+    return {"message": "completed"}
+
+
 @router.post("/{escort_id}/trips/{trip_id}/reaching")
 async def reaching_trip(
     escort_id: uuid.UUID,
