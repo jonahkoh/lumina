@@ -55,6 +55,16 @@ services:
     ports:
       - "6379:6379"
 
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    networks:
+      - eldercare-net
+    depends_on:
+      - redis
+    ports:
+      - "5540:5540"
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres
