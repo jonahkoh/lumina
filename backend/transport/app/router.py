@@ -1,7 +1,9 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -10,13 +12,15 @@ import redis.asyncio as aioredis
 from app import dashboard as dash
 from app.config import settings
 from app.kafka_client import publish
-from app.matching import match_trip, pop_next_driver, pop_next_escort
+from app.matching import cleanup_trip_redis, get_trip_assignment, match_trip, pop_next_driver, pop_next_escort
 from app.schemas import (
     MatchResult,
     ReachingBody,
     TripRequest,
     TripStatusResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -48,14 +52,52 @@ async def trip_status(trip_id: uuid.UUID):
 
 @router.post("/trips/{trip_id}/cancel")
 async def cancel_trip(trip_id: uuid.UUID):
-    async with _redis() as r:
-        await r.delete(f"candidates:driver:{trip_id}")
-        await r.delete(f"candidates:escort:{trip_id}")
+    cancelled_at = datetime.now(timezone.utc).isoformat()
+    assignment = await get_trip_assignment(trip_id)
+
+    if assignment:
+        driver_id = assignment.get("driver_id")
+        escort_id = assignment.get("escort_id")
+        async with httpx.AsyncClient(timeout=5) as client:
+            if driver_id:
+                try:
+                    await client.patch(
+                        f"{settings.DRIVER_SERVICE_URL}/drivers/{driver_id}/trips",
+                        json={"remove_future_trip_id": str(trip_id)},
+                    )
+                    await client.patch(
+                        f"{settings.DRIVER_SERVICE_URL}/drivers/{driver_id}/status",
+                        json={"status": "AVAILABLE"},
+                    )
+                except Exception:
+                    logger.warning("Failed to clean up driver %s for cancelled trip %s", driver_id, trip_id)
+            if escort_id:
+                try:
+                    await client.patch(
+                        f"{settings.ESCORT_SERVICE_URL}/escorts/{escort_id}/trips",
+                        json={"remove_future_trip_id": str(trip_id)},
+                    )
+                    await client.patch(
+                        f"{settings.ESCORT_SERVICE_URL}/escorts/{escort_id}/status",
+                        json={"status": "AVAILABLE"},
+                    )
+                except Exception:
+                    logger.warning("Failed to clean up escort %s for cancelled trip %s", escort_id, trip_id)
+    else:
+        driver_id = None
+        escort_id = None
+
+    await cleanup_trip_redis(trip_id)
     publish(
         "trip.cancelled",
-        {"trip_id": str(trip_id), "cancelled_at": datetime.now(timezone.utc).isoformat()},
+        {
+            "trip_id": str(trip_id),
+            "driver_id": driver_id,
+            "escort_id": escort_id,
+            "cancelled_at": cancelled_at,
+        },
     )
-    return {"trip_id": str(trip_id), "cancelled_at": datetime.now(timezone.utc).isoformat()}
+    return {"trip_id": str(trip_id), "cancelled_at": cancelled_at}
 
 
 @router.post("/trips/{trip_id}/reaching")
