@@ -252,7 +252,7 @@ async def complete_trip(
     flag_modified(driver, "past_trip_ids")
     await db.commit()
 
-    _publish(_get_producer(), "trip.completed", {
+    _publish(_get_producer(), "trip.completed.driver", {
         "trip_id": str(trip_id),
         "driver_id": str(driver_id),
         "completed_at": dt_class.now(timezone.utc).isoformat(),
