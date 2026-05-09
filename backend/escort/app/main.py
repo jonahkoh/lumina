@@ -105,8 +105,16 @@ async def _consumer_loop(stop_event: asyncio.Event) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    for attempt in range(10):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            break
+        except Exception as exc:
+            if attempt == 9:
+                raise
+            logger.warning("DB not ready (attempt %d/10): %s — retrying in 3s", attempt + 1, exc)
+            await asyncio.sleep(3)
 
     stop_event = asyncio.Event()
     consumer_task = asyncio.create_task(_consumer_loop(stop_event))
