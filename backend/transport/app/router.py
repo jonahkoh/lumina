@@ -137,11 +137,20 @@ def _render_dashboard(role: str, actor_id: Optional[str]) -> str:
     const ROLE = "{role}";
     const ACTOR_ID = "{actor_id or ''}";
 
+    const TRIP_TYPE_LABEL = {{
+      DRIVER_ONLY: "Driver only",
+      ESCORT_ONLY: "Escort only",
+      COMBINED: "Driver + Escort",
+    }};
+
     function renderTable(headers, rows) {{
       if (!rows || rows.length === 0) return "<em>No records</em>";
       const ths = headers.map(h => `<th>${{h}}</th>`).join("");
       const trs = rows.map(r =>
-        "<tr>" + headers.map(h => `<td>${{r[h] ?? ""}}</td>`).join("") + "</tr>"
+        "<tr>" + headers.map(h => {{
+          if (h === "trip_type") return `<td>${{TRIP_TYPE_LABEL[r[h]] || r[h] || ""}}</td>`;
+          return `<td>${{r[h] ?? ""}}</td>`;
+        }}).join("") + "</tr>"
       ).join("");
       return `<table><thead><tr>${{ths}}</tr></thead><tbody>${{trs}}</tbody></table>`;
     }}
@@ -188,7 +197,7 @@ def _render_dashboard(role: str, actor_id: Optional[str]) -> str:
             <table><thead><tr><th>ID</th><th>Status</th><th>Provider</th><th>Upcoming</th><th></th></tr></thead>
             <tbody>${{(data.escorts || []).map(renderEscortRow).join("")}}</tbody></table></div>`;
           html += `<div class="section"><h2>Past Trips</h2>
-            ${{renderTable(["trip_id","outcome","completed_at","provider_name"], data.past_trips || [])}}</div>`;
+            ${{renderTable(["trip_id","outcome","trip_type","completed_at","provider_name"], data.past_trips || [])}}</div>`;
         }} else if (ROLE === "driver") {{
           const d = data.driver || {{}};
           html += `<div class="section"><h2>Profile</h2>
