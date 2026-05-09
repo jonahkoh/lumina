@@ -55,16 +55,37 @@ services:
     ports:
       - "6379:6379"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    networks:
+      - eldercare-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   driver-service:
     build:
-      context: ./backend/driver
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/driver/Dockerfile
     container_name: driver-service
     networks:
       - eldercare-net
     depends_on:
       - kafka
+      - postgres
     ports:
       - "8001:8001"
     env_file:
-      - ./backend/driver/.env
+      - .env
+    # Override localhost values with internal docker-network hostnames
+    environment:
+      POSTGRES_HOST: postgres
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+volumes:
+  postgres_data:
