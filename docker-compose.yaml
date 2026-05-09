@@ -77,6 +77,12 @@ services:
       POSTGRES_PASSWORD: password
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backend/init/create_databases.sql:/docker-entrypoint-initdb.d/create_databases.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   driver-service:
     build:
@@ -86,8 +92,10 @@ services:
     networks:
       - eldercare-net
     depends_on:
-      - kafka
-      - postgres
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     ports:
       - "8001:8001"
     env_file:
@@ -105,8 +113,10 @@ services:
     networks:
       - eldercare-net
     depends_on:
-      - kafka
-      - postgres
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     ports:
       - "8002:8002"
     env_file:
@@ -123,8 +133,10 @@ services:
     networks:
       - eldercare-net
     depends_on:
-      - kafka
-      - postgres
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     ports:
       - "8003:8003"
     env_file:
