@@ -29,7 +29,7 @@ class TwilioService:
 
     def send_whatsapp_message(self, to: str, body: str) -> TwilioResult:
         message = self.client.messages.create(
-            from_=to_whatsapp_address(self.settings.twilio_from_phone_number),
+            from_=to_whatsapp_address(self.settings.whatsapp_sender_phone_number),
             to=to_whatsapp_address(to),
             body=body,
             status_callback=f"{self.settings.public_base_url.rstrip('/')}/webhooks/twilio/message/status",
