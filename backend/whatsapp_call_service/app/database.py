@@ -50,6 +50,8 @@ def _apply_lightweight_migrations() -> None:
     with engine.begin() as connection:
         if "role" not in contact_columns:
             connection.execute(text("ALTER TABLE contacts ADD COLUMN role VARCHAR(32)"))
+        if "language_preference" not in contact_columns:
+            connection.execute(text("ALTER TABLE contacts ADD COLUMN language_preference VARCHAR(64) DEFAULT 'english'"))
         if "message_text" not in scheduled_call_columns:
             connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN message_text TEXT"))
         if "appointment_location" not in scheduled_call_columns:

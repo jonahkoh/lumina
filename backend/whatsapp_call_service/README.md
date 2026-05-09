@@ -11,7 +11,7 @@ FastAPI microservice for Twilio WhatsApp messaging and scheduled outbound Voice 
 - Persist contacts, caregiver profiles, elderly profiles, caregiver-elderly links, conversation sessions, outbound messages, scheduled calls, and Twilio webhook events in a local SQLite database.
 - Run an API process and a separate worker process.
 - Execute due calls with Twilio Voice and return TwiML that plays one configured static audio URL or a generated ElevenLabs audio clip.
-- Translate chatbot messages and outbound call text with SEA-LION when a user has a non-English preferred language.
+- Translate chatbot messages, scheduled WhatsApp reminders, and outbound call text with SEA-LION when a user has a non-English preferred language.
 - Cache common translations and generated audio clips to reduce repeat SEA-LION and ElevenLabs calls.
 
 Twilio `<Play>` does not support MP4 audio directly. Configure `TWILIO_STATIC_CALL_AUDIO_URL` as a public MP3/WAV/AIFF/GSM/u-law URL.
@@ -50,6 +50,8 @@ SEA_LION_MODEL_NAME=...
 ELEVENLABS_API_KEY=...
 AUDIO_CACHE_DIR=assets/audio_cache
 ```
+
+The service also accepts the existing `API_KEY`, `API_URL`, and `MODEL_NAME` environment variable names used by `backend/bot/translation.py`.
 
 Configure these Twilio webhook URLs:
 
@@ -122,7 +124,7 @@ Existing commands:
 - `schedule`: start the existing call scheduling flow.
 - `/reset`: remove your saved bot profile data, conversation state, and pending reminder calls, then start again.
 
-Image parsing is not implemented yet. If `MediaUrl0` is received, the bot asks the user to type appointment details manually.
+If `MediaUrl0` is received, the bot asks the user to type appointment details manually.
 
 WhatsApp button templates are optional. Configure Content SIDs if available; numbered text fallback always works.
 
@@ -133,7 +135,7 @@ WhatsApp button templates are optional. Configure Content SIDs if available; num
 3. Bot asks for a Singapore time, for example `today 3pm`, `tomorrow 9:30am`, or `9 May 2026 3:30pm`.
 4. Bot asks where the appointment is, for example the clinic or hospital name and address.
 5. User replies `YES`.
-6. Worker creates the caregiver reminder call for 2 hours before the appointment, including the appointment time and destination.
+6. Worker sends a localized WhatsApp reminder and creates the caregiver reminder call for 2 hours before the appointment, including the appointment time and destination.
 
 Send `cancel` during the flow to stop, or after scheduling to cancel the latest pending call created by that WhatsApp user.
 

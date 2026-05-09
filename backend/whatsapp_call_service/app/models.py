@@ -80,6 +80,7 @@ class Contact(Base):
     whatsapp_address: Mapped[str] = mapped_column(String(48), unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[ContactRole | None] = mapped_column(Enum(ContactRole), nullable=True, index=True)
+    language_preference: Mapped[str] = mapped_column(String(64), default="english")
     opted_in: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

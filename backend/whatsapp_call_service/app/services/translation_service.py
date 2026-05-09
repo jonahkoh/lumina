@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from collections import OrderedDict
 
 import httpx
@@ -28,6 +29,95 @@ LANGUAGE_MAP = {
 }
 
 
+STATIC_TRANSLATIONS = {
+    "mandarin": {
+        "Welcome to CareKaki. I will help you book escort or transport for an elderly person.": "欢迎使用 CareKaki。我会帮您为长者预约陪诊或交通服务。",
+        "What is your name?": "请问您叫什么名字？",
+        "What is your relationship to the elderly person? For example child, spouse, helper, neighbour, or volunteer.": "请问您和长者是什么关系？例如子女、配偶、帮佣、邻居或义工。",
+        "What is the elderly person's full name?": "请问长者的全名是什么？",
+        "Please tell me the elderly person's full name.": "请告诉我长者的全名。",
+        "What is the elderly person's phone number? For example +6591234567.": "请问长者的电话号码是多少？例如 +6591234567。",
+        "What is the pickup address?": "请问接送地址是什么？",
+        "Please provide the pickup address.": "请提供接送地址。",
+        "What is the 6-digit postal code?": "请问 6 位邮政编码是什么？",
+        "Postal code must be 6 digits. Please try again.": "邮政编码必须是 6 位数字。请再试一次。",
+        "What language or dialect does the elderly person prefer? For example English, Mandarin, Malay, Tamil, Hokkien, or Cantonese.": "长者偏好使用什么语言或方言？例如英语、华语、马来语、淡米尔语、福建话或广东话。",
+        "Mobility level?": "行动能力需求？",
+        "Need transport": "需要交通",
+        "Need escort": "需要陪诊",
+        "Need both": "两者都需要",
+        "Please choose a valid mobility option.": "请选择有效的行动能力选项。",
+        "Any optional notes? For example hearing difficulty, dementia, lift access, or 'skip'.": "有其他备注吗？例如听力困难、失智、电梯通行，或回复“skip”跳过。",
+        "Please confirm this profile:": "请确认以下资料：",
+        "Reply YES to save, or EDIT to restart.": "回复 YES 保存，或回复 EDIT 重新填写。",
+        "Reply YES to save this profile, or EDIT to restart.": "回复 YES 保存此资料，或回复 EDIT 重新填写。",
+        "Where is the appointment? Reply with the clinic or hospital name and address.": "预约地点在哪里？请回复诊所或医院名称和地址。",
+        "Please tell me where the appointment is.": "请告诉我预约地点。",
+        "Reply YES to confirm or CANCEL to stop.": "回复 YES 确认，或回复 CANCEL 停止。",
+        "Cancelled the current flow.": "已取消当前流程。",
+        "Cancelled the scheduling flow.": "已取消预约流程。",
+        "What date and time is the appointment? Reply in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm.": "预约日期和时间是什么？请用新加坡时间回复，例如 today 3pm、tomorrow 9:30am，或 9 May 2026 3:30pm。",
+        "When is the appointment date? Reply in Singapore time, for example today 3pm, tomorrow 9:30am, or 9 May 2026 3:30pm.": "预约日期是什么时候？请用新加坡时间回复，例如 today 3pm、tomorrow 9:30am，或 9 May 2026 3:30pm。",
+    },
+    "malay": {
+        "Welcome to CareKaki. I will help you book escort or transport for an elderly person.": "Selamat datang ke CareKaki. Saya akan membantu anda menempah pengiring atau pengangkutan untuk warga emas.",
+        "What is your name?": "Siapakah nama anda?",
+        "What is your relationship to the elderly person? For example child, spouse, helper, neighbour, or volunteer.": "Apakah hubungan anda dengan warga emas itu? Contohnya anak, pasangan, pembantu, jiran, atau sukarelawan.",
+        "What is the elderly person's full name?": "Apakah nama penuh warga emas itu?",
+        "What is the elderly person's phone number? For example +6591234567.": "Apakah nombor telefon warga emas itu? Contohnya +6591234567.",
+        "What is the pickup address?": "Apakah alamat pengambilan?",
+        "What is the 6-digit postal code?": "Apakah poskod 6 digit?",
+        "What language or dialect does the elderly person prefer? For example English, Mandarin, Malay, Tamil, Hokkien, or Cantonese.": "Apakah bahasa atau dialek pilihan warga emas itu? Contohnya Inggeris, Mandarin, Melayu, Tamil, Hokkien, atau Kantonis.",
+        "Mobility level?": "Tahap mobiliti?",
+        "Need transport": "Perlu pengangkutan",
+        "Need escort": "Perlu pengiring",
+        "Need both": "Perlu kedua-duanya",
+        "Any optional notes? For example hearing difficulty, dementia, lift access, or 'skip'.": "Ada nota tambahan? Contohnya masalah pendengaran, demensia, akses lif, atau 'skip'.",
+        "Where is the appointment? Reply with the clinic or hospital name and address.": "Di manakah janji temu itu? Balas dengan nama dan alamat klinik atau hospital.",
+    },
+    "tamil": {
+        "Welcome to CareKaki. I will help you book escort or transport for an elderly person.": "CareKaki-க்கு வரவேற்கிறோம். முதியவருக்கான துணை அல்லது போக்குவரத்தை பதிவு செய்ய நான் உதவுவேன்.",
+        "What is your name?": "உங்கள் பெயர் என்ன?",
+        "What is the elderly person's full name?": "முதியவரின் முழுப் பெயர் என்ன?",
+        "What is the elderly person's phone number? For example +6591234567.": "முதியவரின் தொலைபேசி எண் என்ன? உதாரணம் +6591234567.",
+        "What is the pickup address?": "அழைத்துச் செல்ல வேண்டிய முகவரி என்ன?",
+        "What is the 6-digit postal code?": "6 இலக்க அஞ்சல் குறியீடு என்ன?",
+        "Mobility level?": "நடமாட்ட உதவி தேவை?",
+        "Need transport": "போக்குவரத்து தேவை",
+        "Need escort": "துணை தேவை",
+        "Need both": "இரண்டும் தேவை",
+        "Where is the appointment? Reply with the clinic or hospital name and address.": "சந்திப்பு எங்கு உள்ளது? மருத்துவமனை அல்லது கிளினிக் பெயர் மற்றும் முகவரியை அனுப்பவும்.",
+    },
+}
+
+
+STATIC_TEMPLATE_TRANSLATIONS = {
+    "mandarin": [
+        (r"Profile saved\. Book escort or transport for (.+)\.", "资料已保存。为 {0} 预约陪诊或交通服务。"),
+        (r"Book an appointment for (.+)\.", "为 {0} 预约。"),
+        (r"Confirm appointment for (.+) at (.+)\. Appointment place: (.+)\. We will call the caregiver 2 hours before at (.+) to remind them that the elderly person has an appointment today\. Reply YES to confirm or CANCEL to stop\.", "请确认 {0} 在 {1} 的预约。预约地点：{2}。我们会在 {3}，也就是预约前 2 小时，打电话提醒照护者长者今天有预约。回复 YES 确认，或回复 CANCEL 停止。"),
+        (r"Appointment confirmed for (.+) at (.+)\. We will call the caregiver at (.+)\.", "已确认 {0} 在 {1} 的预约。我们会在 {2} 打电话给照护者。"),
+        (r"Caregiver: (.+)", "照护者：{0}"),
+        (r"Caregiver phone: (.+)", "照护者电话：{0}"),
+        (r"Relationship: (.+)", "关系：{0}"),
+        (r"Elderly: (.+)", "长者：{0}"),
+        (r"Elderly phone: (.+)", "长者电话：{0}"),
+        (r"Pickup: (.+)", "接送地址：{0}"),
+        (r"Language/dialect: (.+)", "语言/方言：{0}"),
+        (r"Mobility: (.+)", "行动需求：{0}"),
+        (r"Notes: (.+)", "备注：{0}"),
+    ],
+    "malay": [
+        (r"Profile saved\. Book escort or transport for (.+)\.", "Profil disimpan. Tempah pengiring atau pengangkutan untuk {0}."),
+        (r"Book an appointment for (.+)\.", "Tempah janji temu untuk {0}."),
+    ],
+    "tamil": [
+        (r"Profile saved\. Book escort or transport for (.+)\.", "சுயவிவரம் சேமிக்கப்பட்டது. {0} அவர்களுக்கு துணை அல்லது போக்குவரத்தை பதிவு செய்யுங்கள்."),
+        (r"Book an appointment for (.+)\.", "{0} அவர்களுக்கு சந்திப்பை பதிவு செய்யுங்கள்."),
+    ],
+}
+
+
 class TranslationService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -44,7 +134,11 @@ class TranslationService:
             self._cache.move_to_end(key)
             return cached
 
-        translated = self._translate_via_sea_lion(text, normalized_language) or text
+        translated = (
+            self._translate_static(text, normalized_language)
+            or self._translate_via_sea_lion(text, normalized_language)
+            or text
+        )
         self._store(key, translated)
         return translated
 
@@ -67,6 +161,17 @@ class TranslationService:
         while len(self._cache) > self.settings.translation_cache_max_size:
             self._cache.popitem(last=False)
 
+    @staticmethod
+    def _translate_static(text: str, target_language: str) -> str | None:
+        exact = STATIC_TRANSLATIONS.get(target_language, {}).get(text)
+        if exact:
+            return exact
+        for pattern, replacement in STATIC_TEMPLATE_TRANSLATIONS.get(target_language, []):
+            match = re.fullmatch(pattern, text)
+            if match:
+                return replacement.format(*match.groups())
+        return None
+
     def _translate_via_sea_lion(self, text: str, target_language: str) -> str | None:
         if not (
             self.settings.sea_lion_api_key
@@ -76,6 +181,10 @@ class TranslationService:
             return None
 
         language_name = LANGUAGE_MAP.get(target_language, target_language)
+        api_url = self.settings.sea_lion_api_url.strip().strip('"').strip("'")
+        if api_url and not api_url.startswith(("http://", "https://")):
+            api_url = f"https://{api_url}"
+
         payload = {
             "model": self.settings.sea_lion_model_name,
             "messages": [
@@ -100,7 +209,7 @@ class TranslationService:
 
         try:
             with httpx.Client(timeout=30) as client:
-                response = client.post(self.settings.sea_lion_api_url, headers=headers, json=payload)
+                response = client.post(api_url, headers=headers, json=payload)
                 response.raise_for_status()
             result = response.json()
             return result["choices"][0]["message"]["content"].strip() or None

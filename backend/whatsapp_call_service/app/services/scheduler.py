@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import ScheduledCall, ScheduledCallStatus, utcnow
+from app.models import MessageStatus, OutboundMessage, ScheduledCall, ScheduledCallStatus, utcnow
 from app.services.audio_service import AudioService
 from app.services.phone_numbers import normalize_e164
 from app.services.translation_service import TranslationService
@@ -73,7 +73,9 @@ def execute_due_call(
     try:
         call.status = ScheduledCallStatus.in_progress
         db.commit()
-        _prepare_call_audio(settings, call, translation, audio)
+        localized_text = _localized_call_text(settings, call, translation)
+        _send_whatsapp_reminder(db, twilio, call, localized_text)
+        _prepare_call_audio(settings, call, localized_text, audio)
         db.commit()
         result = twilio.create_outbound_call(call.to_phone_number, str(call.id))
         call.twilio_call_sid = result.sid
@@ -92,18 +94,52 @@ def execute_due_call(
 def _prepare_call_audio(
     settings: Settings,
     call: ScheduledCall,
-    translation: TranslationService | None = None,
+    localized_text: str | None = None,
     audio: AudioService | None = None,
 ) -> None:
-    if not call.message_text:
+    text = localized_text or call.message_text
+    if not text:
         return
 
-    translation_service = translation or TranslationService(settings)
     audio_service = audio or AudioService(settings)
-    localized_text = translation_service.translate(call.message_text, call.language)
-    generated_url = audio_service.text_to_speech(localized_text, call.language)
+    generated_url = audio_service.text_to_speech(text, call.language)
     if generated_url:
         call.audio_url = generated_url
+
+
+def _localized_call_text(
+    settings: Settings,
+    call: ScheduledCall,
+    translation: TranslationService | None = None,
+) -> str | None:
+    if not call.message_text:
+        return None
+    translation_service = translation or TranslationService(settings)
+    return translation_service.translate(call.message_text, call.language)
+
+
+def _send_whatsapp_reminder(
+    db: Session,
+    twilio: TwilioService,
+    call: ScheduledCall,
+    localized_text: str | None,
+) -> None:
+    if not call.requested_by_whatsapp or not localized_text:
+        return
+
+    message = OutboundMessage(
+        to_whatsapp=call.requested_by_whatsapp,
+        body=localized_text,
+        status=MessageStatus.queued,
+    )
+    db.add(message)
+    try:
+        result = twilio.send_whatsapp_message(call.requested_by_whatsapp, localized_text)
+        message.twilio_sid = result.sid
+        message.status = MessageStatus.sent
+    except Exception as exc:  # pragma: no cover - live Twilio failures are environment-dependent
+        message.status = MessageStatus.failed
+        message.error_message = str(exc)
 
 
 def _as_utc(value: datetime) -> datetime:

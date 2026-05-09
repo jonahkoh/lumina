@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from zoneinfo import ZoneInfo
 
@@ -90,6 +90,7 @@ class ConversationEngine:
                     return self._language_prompt(prefix="Please choose a language option.")
                 session.state = ConversationState.awaiting_role
                 session.data = {"start_language": language}
+                contact.language_preference = language
                 db.commit()
                 return self._start_caregiver_onboarding(db, contact, session)
             if not session.data.get("start_language"):
@@ -155,7 +156,7 @@ class ConversationEngine:
         return "\n".join(lines)
 
     def _preferred_language(self, db: Session, contact: Contact, session: ConversationSession) -> str:
-        for key in ("booking_language", "elderly_language", "caregiver_language", "start_language"):
+        for key in ("caregiver_language", "start_language"):
             if session.data.get(key):
                 return session.data[key]
 
@@ -163,6 +164,9 @@ class ConversationEngine:
             caregiver = db.scalar(select(CaregiverProfile).where(CaregiverProfile.contact_id == contact.id))
             if caregiver is not None:
                 return caregiver.preferred_language
+
+        if contact.language_preference:
+            return contact.language_preference
 
         elderly = db.scalar(select(ElderlyProfile).where(ElderlyProfile.contact_id == contact.id))
         if elderly is not None:
@@ -174,6 +178,7 @@ class ConversationEngine:
     ) -> WhatsAppReply:
         contact.role = ContactRole.caregiver
         start_language = session.data.get("start_language", "english")
+        contact.language_preference = start_language
         session.data = {"flow": "caregiver", "caregiver_language": start_language}
         session.state = ConversationState.awaiting_caregiver_name
         db.commit()
@@ -300,7 +305,7 @@ class ConversationEngine:
             session.data = {
                 **session.data,
                 "recipient": option["phone_number"],
-                "booking_language": option.get("preferred_language") or "english",
+                "elderly_language": option.get("preferred_language") or "english",
                 "booking_elderly_name": option["name"],
             }
             session.state = ConversationState.awaiting_time
@@ -344,7 +349,7 @@ class ConversationEngine:
             return WhatsAppReply(
                 "Confirm appointment for "
                 f"{session.data.get('booking_elderly_name', session.data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
-                f"Location: {text}. "
+                f"Appointment place: {text}. "
                 f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
                 "Reply YES to confirm or CANCEL to stop.",
                 content_sid=self.settings.twilio_yes_no_content_sid or None,
@@ -370,7 +375,7 @@ class ConversationEngine:
                         "Please prepare escort or transport support."
                     ),
                     appointment_location=session.data.get("appointment_location"),
-                    language=session.data.get("booking_language") or self._preferred_language(db, contact, session),
+                    language=self._preferred_language(db, contact, session),
                 )
                 session.state = ConversationState.idle
                 session.data = {}
@@ -392,7 +397,7 @@ class ConversationEngine:
                 return WhatsAppReply(
                     "Confirm appointment for "
                     f"{session.data.get('booking_elderly_name', session.data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
-                    f"Location: {text}. "
+                    f"Appointment place: {text}. "
                     f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
                     "Reply YES to confirm or CANCEL to stop.",
                     content_sid=self.settings.twilio_yes_no_content_sid or None,
@@ -426,7 +431,8 @@ class ConversationEngine:
             )
             return {
                 "recipient": elderly.phone_number,
-                "booking_language": elderly.preferred_language,
+                "caregiver_language": caregiver.preferred_language,
+                "elderly_language": elderly.preferred_language,
                 "booking_elderly_name": elderly.name,
             }
 
@@ -446,7 +452,7 @@ class ConversationEngine:
         db.flush()
         return {
             "recipient": elderly.phone_number,
-            "booking_language": elderly.preferred_language,
+            "elderly_language": elderly.preferred_language,
             "booking_elderly_name": elderly.name,
         }
 
@@ -464,6 +470,7 @@ class ConversationEngine:
         else:
             caregiver.name = data.get("caregiver_name") or caregiver.name
             caregiver.preferred_language = data.get("caregiver_language") or caregiver.preferred_language
+        contact.language_preference = caregiver.preferred_language
         contact.display_name = caregiver.name
         return caregiver
 
@@ -509,7 +516,7 @@ class ConversationEngine:
 
             options = [_elderly_booking_option(profile) for profile in elderly_profiles]
             session.state = ConversationState.awaiting_elderly_selection
-            session.data = {"booking_options": options}
+            session.data = {"booking_options": options, "caregiver_language": caregiver.preferred_language}
             db.commit()
             return WhatsAppReply(self._elderly_selection_text(options))
 
@@ -769,7 +776,8 @@ def _is_postal_code(value: str) -> bool:
 
 
 def _format_singapore_datetime(value: datetime) -> str:
-    singapore_time = value.astimezone(ZoneInfo("Asia/Singapore")) if value.tzinfo else value
+    source_time = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    singapore_time = source_time.astimezone(ZoneInfo("Asia/Singapore"))
     period = "am" if singapore_time.hour < 12 else "pm"
     hour = singapore_time.hour % 12 or 12
     return f"{singapore_time.day} {singapore_time:%b %Y} {hour}:{singapore_time.minute:02d}{period}"

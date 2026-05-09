@@ -54,6 +54,7 @@ class ContactResponse(BaseModel):
     whatsapp_address: str
     display_name: str | None = None
     role: ContactRole | None = None
+    language_preference: str = "english"
 
     model_config = {"from_attributes": True}
 
