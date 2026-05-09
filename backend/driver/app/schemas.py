@@ -55,3 +55,12 @@ class TripUpdate(BaseModel):
     add_future_trip_id: Optional[uuid.UUID] = None
     add_past_trip_id: Optional[uuid.UUID] = None
     remove_future_trip_id: Optional[uuid.UUID] = None
+
+
+class RejectBody(BaseModel):
+    reason: Optional[str] = None
+
+
+class CompleteBody(BaseModel):
+    photo_url: str
+    dropoff_confirmed: bool

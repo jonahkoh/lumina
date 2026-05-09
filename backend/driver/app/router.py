@@ -1,8 +1,10 @@
+import json
 import math
 import uuid
-from datetime import datetime as dt_class
-from typing import List
+from datetime import datetime as dt_class, timezone
+from typing import List, Optional
 
+from confluent_kafka import Producer
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,9 +13,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.database import get_db
 from app.models import Driver, DriverStatus, VehicleType
 from app.schemas import (
+    CompleteBody,
     DriverCreate,
     DriverResponse,
     DriverWithScore,
+    RejectBody,
     StatusUpdate,
     TripUpdate,
 )
@@ -49,6 +53,16 @@ async def _get_driver_or_404(driver_id: uuid.UUID, db: AsyncSession) -> Driver:
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
+
+
+def _get_producer() -> Producer:
+    from app.main import _make_kafka_config
+    return Producer(_make_kafka_config())
+
+
+def _publish(producer: Producer, topic: str, payload: dict) -> None:
+    producer.produce(topic, value=json.dumps(payload).encode())
+    producer.flush()
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -160,3 +174,93 @@ async def update_trips(
     await db.commit()
     await db.refresh(driver)
     return driver
+
+
+# ── trip lifecycle ────────────────────────────────────────────────────────────
+
+@router.post("/{driver_id}/trips/{trip_id}/accept")
+async def accept_trip(
+    driver_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await _get_driver_or_404(driver_id, db)
+    driver.status = DriverStatus.BUSY
+    await db.commit()
+
+    _publish(_get_producer(), "trip.accepted.driver", {
+        "trip_id": str(trip_id),
+        "driver_id": str(driver_id),
+        "accepted_at": dt_class.now(timezone.utc).isoformat(),
+    })
+    return {"message": "accepted"}
+
+
+@router.post("/{driver_id}/trips/{trip_id}/reject")
+async def reject_trip(
+    driver_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    body: RejectBody,
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await _get_driver_or_404(driver_id, db)
+
+    future_ids = [t for t in (driver.future_trip_ids or []) if t != trip_id]
+    driver.future_trip_ids = future_ids
+    flag_modified(driver, "future_trip_ids")
+    await db.commit()
+
+    _publish(_get_producer(), "trip.rejected.driver", {
+        "trip_id": str(trip_id),
+        "driver_id": str(driver_id),
+        "rejected_at": dt_class.now(timezone.utc).isoformat(),
+        "reason": body.reason,
+    })
+    return {"message": "rejected"}
+
+
+@router.post("/{driver_id}/trips/{trip_id}/complete")
+async def complete_trip(
+    driver_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    body: CompleteBody,
+    db: AsyncSession = Depends(get_db),
+):
+    driver = await _get_driver_or_404(driver_id, db)
+
+    future_ids = [t for t in (driver.future_trip_ids or []) if t != trip_id]
+    past_ids = list(driver.past_trip_ids or [])
+    if trip_id not in past_ids:
+        past_ids.append(trip_id)
+
+    driver.future_trip_ids = future_ids
+    driver.past_trip_ids = past_ids
+    driver.status = DriverStatus.AVAILABLE
+    flag_modified(driver, "future_trip_ids")
+    flag_modified(driver, "past_trip_ids")
+    await db.commit()
+
+    _publish(_get_producer(), "trip.completed", {
+        "trip_id": str(trip_id),
+        "driver_id": str(driver_id),
+        "completed_at": dt_class.now(timezone.utc).isoformat(),
+        "photo_url": body.photo_url,
+        "dropoff_confirmed": body.dropoff_confirmed,
+    })
+    return {"message": "completed"}
+
+
+@router.post("/{driver_id}/trips/{trip_id}/reaching")
+async def reaching_trip(
+    driver_id: uuid.UUID,
+    trip_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_driver_or_404(driver_id, db)
+
+    _publish(_get_producer(), "trip.driver_reaching", {
+        "trip_id": str(trip_id),
+        "driver_id": str(driver_id),
+        "triggered_at": dt_class.now(timezone.utc).isoformat(),
+    })
+    return {"message": "notified"}
