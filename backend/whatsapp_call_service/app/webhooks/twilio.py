@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -34,20 +36,18 @@ async def whatsapp_webhook(
         button_text=form.get("ButtonText"),
         button_payload=form.get("ButtonPayload") or form.get("Payload"),
     )
-    message = OutboundMessage(to_whatsapp=from_number, body=reply.body, status=MessageStatus.queued)
-    db.add(message)
-    try:
-        result = twilio.send_whatsapp_template(
-            from_number,
-            reply.body,
-            content_sid=reply.content_sid,
-            content_variables=reply.content_variables,
-        )
-        message.twilio_sid = result.sid
-        message.status = MessageStatus.sent
-    except Exception as exc:
-        message.status = MessageStatus.failed
-        message.error_message = str(exc)
+    for pre_message in reply.pre_messages:
+        _send_whatsapp_reply(db, twilio, from_number, pre_message)
+    if reply.pre_messages:
+        await asyncio.sleep(1)
+    _send_whatsapp_reply(
+        db,
+        twilio,
+        from_number,
+        reply.body,
+        content_sid=reply.content_sid,
+        content_variables=reply.content_variables,
+    )
     db.commit()
     return WebhookAck()
 
@@ -131,6 +131,31 @@ def _voice_status_event_key(form: dict) -> str:
     if sequence is not None:
         return f"{call_sid}:{sequence}:{status_value}"
     return f"{call_sid}:{status_value}:{utcnow().isoformat()}"
+
+
+def _send_whatsapp_reply(
+    db: Session,
+    twilio: TwilioService,
+    to_whatsapp: str,
+    body: str,
+    content_sid: str | None = None,
+    content_variables: dict[str, str] | None = None,
+) -> OutboundMessage:
+    message = OutboundMessage(to_whatsapp=to_whatsapp, body=body, status=MessageStatus.queued)
+    db.add(message)
+    try:
+        result = twilio.send_whatsapp_template(
+            to_whatsapp,
+            body,
+            content_sid=content_sid,
+            content_variables=content_variables or {},
+        )
+        message.twilio_sid = result.sid
+        message.status = MessageStatus.sent
+    except Exception as exc:
+        message.status = MessageStatus.failed
+        message.error_message = str(exc)
+    return message
 
 
 def _normalized_inbound_body(form: dict) -> str:

@@ -37,6 +37,7 @@ class WhatsAppReply:
     content_sid: str | None = None
     content_variables: dict[str, str] = field(default_factory=dict)
     language_override: str | None = None
+    pre_messages: tuple[str, ...] = ()
 
 
 class ConversationEngine:
@@ -173,6 +174,7 @@ class ConversationEngine:
             content_sid=None,
             content_variables=reply.content_variables,
             language_override=reply.language_override,
+            pre_messages=tuple(self._localize_body(message, language) for message in reply.pre_messages),
         )
 
     def _localize_body(self, body: str, language: str) -> str:
@@ -575,12 +577,13 @@ class ConversationEngine:
                     appointment_location=session.data.get("appointment_location"),
                     language=self._call_language(db, contact, session),
                 )
+                confirmed_data = dict(session.data)
                 session.state = ConversationState.idle
                 session.data = {}
                 db.commit()
                 return WhatsAppReply(
-                    f"Appointment confirmed for {_format_singapore_datetime(scheduled_at)} at {call.appointment_location}. "
-                    + _call_schedule_notice(scheduled_at, reminder_at)
+                    self._appointment_confirmed_text(confirmed_data, scheduled_at, reminder_at, call.appointment_location),
+                    pre_messages=("Matching you with a nearby MET driver now...",),
                 )
             if lowered in {"no", "n", "cancel", "2"}:
                 session.state = ConversationState.idle
@@ -767,6 +770,20 @@ class ConversationEngine:
             f"Your family member {elderly_name} will be picked up soon for the "
             f"{data.get('appointment_type')} appointment at {data.get('appointment_location')}. "
             f"We will call {elderly_name} now with the reminder."
+        )
+
+    def _appointment_confirmed_text(
+        self,
+        data: dict,
+        scheduled_at: datetime,
+        reminder_at: datetime,
+        appointment_location: str | None,
+    ) -> str:
+        match = _matched_transport_details(data.get("support_type"))
+        return (
+            f"Appointment confirmed for {_format_singapore_datetime(scheduled_at)} at {appointment_location}. "
+            f"You are matched with {match}. "
+            f"{_call_schedule_notice_for_recipient(_recipient_name(data))}"
         )
 
     def _call_language(self, db: Session, contact: Contact, session: ConversationSession) -> str:
@@ -1076,6 +1093,15 @@ def _support_type_call_phrase(value: str | None) -> str:
     }.get((value or "").strip().lower(), "Transport support has been arranged to help you.")
 
 
+def _matched_transport_details(value: str | None) -> str:
+    support_type = (value or "").strip().lower()
+    if support_type == "escort":
+        return "escort Siti Nurhaliza"
+    if support_type == "both":
+        return "driver Lim Wei Ming and escort Siti Nurhaliza"
+    return "driver Lim Wei Ming"
+
+
 def _recipient_name(data: dict) -> str:
     return (
         data.get("booking_elderly_name")
@@ -1148,3 +1174,7 @@ def _reminder_time_for_demo(appointment_time: datetime) -> datetime:
 
 def _call_schedule_notice(appointment_time: datetime, reminder_at: datetime) -> str:
     return "We will call the elderly person shortly for the demo reminder."
+
+
+def _call_schedule_notice_for_recipient(recipient_name: str) -> str:
+    return f"We will call {recipient_name} shortly for the demo reminder."
