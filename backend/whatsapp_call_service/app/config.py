@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     translation_cache_max_size: int = 1024
     elevenlabs_api_key: str = Field(default="", validation_alias=AliasChoices("ELEVENLABS_API_KEY", "ELEVEN_API_KEY"))
     elevenlabs_tts_model_id: str = "eleven_multilingual_v2"
+    elevenlabs_fallback_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
     audio_cache_dir: str = "assets/audio_cache"
     english_voice_id: str = "FXMPPfJPpDj0GSwJ6ASO"
     chinese_voice_id: str = "M0TrFmFeBJS9H4xzdk8Z"

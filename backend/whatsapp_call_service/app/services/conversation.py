@@ -20,6 +20,7 @@ from app.models import (
     OutboundMessage,
     ScheduledCall,
     ScheduledCallStatus,
+    utcnow,
 )
 from app.services.phone_numbers import PhoneNumberError, normalize_e164, to_whatsapp_address
 from app.services.ocr_service import OCRService
@@ -404,11 +405,26 @@ class ConversationEngine:
 
         if scheduled_at is not None:
             session.data = {**session.data, "scheduled_at": scheduled_at.isoformat()}
+            appointment_type = _ocr_appointment_type(extracted)
+            if appointment_type:
+                session.data = {**session.data, "appointment_type": appointment_type}
             if appointment_location:
                 session.data = {**session.data, "appointment_location": appointment_location}
-                session.state = ConversationState.awaiting_confirmation
+                session.state = (
+                    ConversationState.awaiting_support_type
+                    if session.data.get("appointment_type")
+                    else ConversationState.awaiting_appointment_type
+                )
                 db.commit()
-                return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, appointment_location))
+                prefix = (
+                    f"I found the appointment as {_format_singapore_datetime(scheduled_at)} at {appointment_location}."
+                )
+                if session.data.get("appointment_type"):
+                    prefix += f"\nAppointment type: {session.data['appointment_type']}."
+                    return self._support_type_prompt(prefix=prefix)
+                return WhatsAppReply(
+                    f"{prefix}\nWhat type of appointment is it? For example non-fasting lab, cardiology review, or eye clinic."
+                )
             session.state = ConversationState.awaiting_appointment_location
             db.commit()
             return WhatsAppReply(
@@ -418,7 +434,12 @@ class ConversationEngine:
             )
 
         if appointment_location:
-            session.data = {**session.data, "appointment_location": appointment_location}
+            appointment_type = _ocr_appointment_type(extracted)
+            session.data = {
+                **session.data,
+                "appointment_location": appointment_location,
+                **({"appointment_type": appointment_type} if appointment_type else {}),
+            }
             session.state = ConversationState.awaiting_time
             db.commit()
             return WhatsAppReply(
@@ -489,10 +510,32 @@ class ConversationEngine:
             if not text:
                 return WhatsAppReply("Please tell me where the appointment is.")
             session.data = {**session.data, "appointment_location": text}
+            session.state = ConversationState.awaiting_appointment_type
+            db.commit()
+            return WhatsAppReply(
+                "What type of appointment is it? For example non-fasting lab, cardiology review, or eye clinic."
+            )
+
+        if session.state == ConversationState.awaiting_appointment_type:
+            if not text:
+                return WhatsAppReply("Please tell me the appointment type. For example non-fasting lab.")
+            session.data = {**session.data, "appointment_type": text}
+            session.state = ConversationState.awaiting_support_type
+            db.commit()
+            return self._support_type_prompt()
+
+        if session.state == ConversationState.awaiting_support_type:
+            support_type = _parse_support_type(text)
+            if support_type is None:
+                return self._support_type_prompt(prefix="Please choose a valid support option.")
+            session.data = {**session.data, "support_type": support_type}
             session.state = ConversationState.awaiting_confirmation
             db.commit()
             scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
-            return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, text), content_sid=self.settings.twilio_yes_no_content_sid or None)
+            return WhatsAppReply(
+                self._appointment_confirmation_text(session.data, scheduled_at),
+                content_sid=self.settings.twilio_yes_no_content_sid or None,
+            )
 
         if session.state == ConversationState.awaiting_confirmation:
             if lowered in {"yes", "y", "confirm", "1"}:
@@ -500,28 +543,42 @@ class ConversationEngine:
                     session.state = ConversationState.awaiting_appointment_location
                     db.commit()
                     return WhatsAppReply("Where is the appointment? Reply with the clinic or hospital name and address.")
+                if not session.data.get("appointment_type"):
+                    session.state = ConversationState.awaiting_appointment_type
+                    db.commit()
+                    return WhatsAppReply(
+                        "What type of appointment is it? For example non-fasting lab, cardiology review, or eye clinic."
+                    )
+                if not session.data.get("support_type"):
+                    session.state = ConversationState.awaiting_support_type
+                    db.commit()
+                    return self._support_type_prompt()
+                recipient_phone = session.data.get("recipient")
+                if not recipient_phone:
+                    session.state = ConversationState.idle
+                    session.data = {}
+                    db.commit()
+                    return WhatsAppReply("I could not find the elderly person's phone number. Please send 'schedule' and choose the elderly profile again.")
                 scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
-                reminder_at = scheduled_at - timedelta(hours=2)
+                reminder_at = _reminder_time_for_demo(scheduled_at)
+                message_text = self._call_message_text(session.data, scheduled_at)
+                logger.info("appointment reminder message=%s", message_text)
                 call = schedule_call(
                     db,
                     self.settings,
-                    contact.phone_number,
+                    recipient_phone,
                     reminder_at,
                     requested_by_whatsapp=contact.whatsapp_address,
-                    message_text=(
-                        "Hello from CareKaki. The elderly person has an appointment today at "
-                        f"{_format_singapore_datetime(scheduled_at)} at {session.data.get('appointment_location')}. "
-                        "Please prepare escort or transport support."
-                    ),
+                    message_text=message_text,
                     appointment_location=session.data.get("appointment_location"),
-                    language=self._preferred_language(db, contact, session),
+                    language=self._call_language(db, contact, session),
                 )
                 session.state = ConversationState.idle
                 session.data = {}
                 db.commit()
                 return WhatsAppReply(
                     f"Appointment confirmed for {_format_singapore_datetime(scheduled_at)} at {call.appointment_location}. "
-                    f"We will call the caregiver at {_format_singapore_datetime(call.scheduled_at)}."
+                    + _call_schedule_notice(scheduled_at, reminder_at)
                 )
             if lowered in {"no", "n", "cancel", "2"}:
                 session.state = ConversationState.idle
@@ -532,7 +589,10 @@ class ConversationEngine:
                 session.data = {**session.data, "appointment_location": text}
                 db.commit()
                 scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
-                return WhatsAppReply(self._appointment_confirmation_text(session.data, scheduled_at, text), content_sid=self.settings.twilio_yes_no_content_sid or None)
+                return WhatsAppReply(
+                    self._appointment_confirmation_text(session.data, scheduled_at),
+                    content_sid=self.settings.twilio_yes_no_content_sid or None,
+                )
             return WhatsAppReply("Reply YES to confirm or CANCEL to stop.")
 
         return None
@@ -671,15 +731,36 @@ class ConversationEngine:
         )
         return [_elderly_booking_option(profile) for profile in elderly_profiles]
 
-    def _appointment_confirmation_text(self, data: dict, scheduled_at: datetime, appointment_location: str) -> str:
-        reminder_at = scheduled_at - timedelta(hours=2)
+    def _support_type_prompt(self, prefix: str | None = None) -> WhatsAppReply:
+        body = "What support should we arrange?\n1. Escort\n2. Driver\n3. Both escort and driver"
+        if prefix:
+            body = f"{prefix}\n{body}"
+        return WhatsAppReply(body)
+
+    def _appointment_confirmation_text(self, data: dict, scheduled_at: datetime) -> str:
+        reminder_at = _reminder_time_for_demo(scheduled_at)
+        appointment_location = data.get("appointment_location")
         return (
             "Confirm appointment for "
             f"{data.get('booking_elderly_name', data['recipient'])} at {_format_singapore_datetime(scheduled_at)}. "
             f"Appointment place: {appointment_location}. "
-            f"We will call the caregiver 2 hours before at {_format_singapore_datetime(reminder_at)} to remind them that the elderly person has an appointment today. "
+            f"Appointment type: {data.get('appointment_type')}. "
+            f"Support: {_support_type_label(data.get('support_type'))}. "
+            f"{_call_schedule_notice(scheduled_at, reminder_at)} "
             "Reply YES to confirm or CANCEL to stop."
         )
+
+    def _call_message_text(self, data: dict, scheduled_at: datetime) -> str:
+        recipient_name = _recipient_name(data)
+        return (
+            f"Hello {recipient_name}. This is a reminder for your {data.get('appointment_type')} appointment "
+            f"on {_format_spoken_singapore_datetime(scheduled_at)} at {data.get('appointment_location')}. "
+            f"{_support_type_call_phrase(data.get('support_type'))} "
+            "Please get ready a little earlier and bring what you need for the appointment. Bye bye."
+        )
+
+    def _call_language(self, db: Session, contact: Contact, session: ConversationSession) -> str:
+        return session.data.get("elderly_language") or self._preferred_language(db, contact, session)
 
     def _elderly_selection_text(self, options: list[dict], prefix: str | None = None) -> str:
         lines = ["Book an appointment. Choose the elderly profile:"]
@@ -936,11 +1017,62 @@ def _parse_mobility(value: str) -> MobilityLevel | None:
 
 def _ocr_appointment_location(extracted: dict) -> str | None:
     location_parts = []
-    for key in ("appointment_location", "clinic", "department"):
+    for key in ("appointment_location", "clinic"):
         value = (extracted.get(key) or "").strip()
         if value and value not in location_parts:
             location_parts.append(value)
     return ", ".join(location_parts) or None
+
+
+def _ocr_appointment_type(extracted: dict) -> str | None:
+    for key in ("department", "appointment_type", "doctor"):
+        value = (extracted.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _parse_support_type(value: str) -> str | None:
+    normalized = value.strip().lower().replace("-", " ").replace("_", " ")
+    return {
+        "1": "escort",
+        "escort": "escort",
+        "medical escort": "escort",
+        "2": "driver",
+        "driver": "driver",
+        "transport": "driver",
+        "transport driver": "driver",
+        "3": "both",
+        "both": "both",
+        "both escort and driver": "both",
+        "escort and driver": "both",
+        "driver and escort": "both",
+    }.get(normalized)
+
+
+def _support_type_label(value: str | None) -> str:
+    return {
+        "escort": "Escort support",
+        "driver": "Transport",
+        "both": "Transport and escort support",
+    }.get((value or "").strip().lower(), "Escort or driver")
+
+
+def _support_type_call_phrase(value: str | None) -> str:
+    return {
+        "escort": "Someone will come along to assist you.",
+        "driver": "Your transport has been arranged.",
+        "both": "Your transport has been arranged, and someone will come along to assist you.",
+    }.get((value or "").strip().lower(), "Transport support has been arranged to help you.")
+
+
+def _recipient_name(data: dict) -> str:
+    return (
+        data.get("booking_elderly_name")
+        or data.get("recipient_name")
+        or data.get("elderly_name")
+        or "there"
+    )
 
 
 def _parse_ocr_appointment_time(value: str | None, timezone_name: str) -> datetime | None:
@@ -990,3 +1122,19 @@ def _format_singapore_datetime(value: datetime) -> str:
     period = "am" if singapore_time.hour < 12 else "pm"
     hour = singapore_time.hour % 12 or 12
     return f"{singapore_time.day} {singapore_time:%b %Y} {hour}:{singapore_time.minute:02d}{period}"
+
+
+def _format_spoken_singapore_datetime(value: datetime) -> str:
+    source_time = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    singapore_time = source_time.astimezone(ZoneInfo("Asia/Singapore"))
+    period = "am" if singapore_time.hour < 12 else "pm"
+    hour = singapore_time.hour % 12 or 12
+    return f"{singapore_time.day} {singapore_time:%b} {hour}:{singapore_time.minute:02d}{period}"
+
+
+def _reminder_time_for_demo(appointment_time: datetime) -> datetime:
+    return utcnow() + timedelta(seconds=30)
+
+
+def _call_schedule_notice(appointment_time: datetime, reminder_at: datetime) -> str:
+    return "We will call the elderly person shortly for the demo reminder."

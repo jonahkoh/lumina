@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import MessageStatus, OutboundMessage, ScheduledCall, ScheduledCallStatus, utcnow
+from app.models import Contact, MessageStatus, OutboundMessage, ScheduledCall, ScheduledCallStatus, utcnow
 from app.services.audio_service import AudioService
 from app.services.phone_numbers import normalize_e164
 from app.services.translation_service import TranslationService
@@ -73,9 +73,11 @@ def execute_due_call(
     try:
         call.status = ScheduledCallStatus.in_progress
         db.commit()
-        localized_text = _localized_call_text(settings, call, translation)
-        _send_whatsapp_reminder(db, twilio, call, localized_text)
-        _prepare_call_audio(settings, call, localized_text, audio)
+        call_text = _localized_text(settings, call.message_text, call.language, translation)
+        caregiver_language = _caregiver_language(db, call)
+        reminder_text = _localized_text(settings, call.message_text, caregiver_language, translation)
+        _send_whatsapp_reminder(db, twilio, call, reminder_text)
+        _prepare_call_audio(settings, call, call_text, audio)
         db.commit()
         result = twilio.create_outbound_call(call.to_phone_number, str(call.id))
         call.twilio_call_sid = result.sid
@@ -107,15 +109,25 @@ def _prepare_call_audio(
         call.audio_url = generated_url
 
 
-def _localized_call_text(
+def _localized_text(
     settings: Settings,
-    call: ScheduledCall,
+    text: str | None,
+    language: str,
     translation: TranslationService | None = None,
 ) -> str | None:
-    if not call.message_text:
+    if not text:
         return None
     translation_service = translation or TranslationService(settings)
-    return translation_service.translate(call.message_text, call.language)
+    return translation_service.translate(text, language)
+
+
+def _caregiver_language(db: Session, call: ScheduledCall) -> str:
+    if not call.requested_by_whatsapp:
+        return "english"
+    contact = db.scalar(select(Contact).where(Contact.whatsapp_address == call.requested_by_whatsapp))
+    if contact is None:
+        return "english"
+    return (contact.language_preference or "english").strip().lower() or "english"
 
 
 def _send_whatsapp_reminder(

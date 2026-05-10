@@ -39,6 +39,8 @@ class ConversationState(str, enum.Enum):
     awaiting_recipient = "awaiting_recipient"
     awaiting_time = "awaiting_time"
     awaiting_appointment_location = "awaiting_appointment_location"
+    awaiting_appointment_type = "awaiting_appointment_type"
+    awaiting_support_type = "awaiting_support_type"
     awaiting_confirmation = "awaiting_confirmation"
     awaiting_ocr_confirmation = "awaiting_ocr_confirmation"
 

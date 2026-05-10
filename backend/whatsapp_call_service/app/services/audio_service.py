@@ -22,6 +22,19 @@ VOICE_ALIASES = {
     "tamil": "tamil_voice_id",
 }
 
+LANGUAGE_CODES = {
+    "english": "en",
+    "mandarin": "zh",
+    "chinese": "zh",
+    "cantonese": "zh",
+    "hokkien": "zh",
+    "indonesian": "id",
+    "indonesia": "id",
+    "malay": "ms",
+    "tagalog": "fil",
+    "tamil": "ta",
+}
+
 
 class AudioService:
     def __init__(self, settings: Settings) -> None:
@@ -39,7 +52,15 @@ class AudioService:
         if not self.settings.elevenlabs_api_key:
             return None
 
-        audio = self._generate_audio(text, voice_id)
+        audio = self._generate_audio(text, voice_id, language)
+        if audio is None and voice_id != self.settings.elevenlabs_fallback_voice_id:
+            fallback_voice_id = self.settings.elevenlabs_fallback_voice_id
+            logger.info("ElevenLabs retrying with fallback voice_id=%s", fallback_voice_id)
+            voice_id = fallback_voice_id
+            cache_path = self.cache_path(text, voice_id)
+            if cache_path.exists():
+                return self.public_url_for(cache_path)
+            audio = self._generate_audio(text, voice_id, language)
         if audio is None:
             return None
 
@@ -71,13 +92,16 @@ class AudioService:
     def service_root() -> Path:
         return Path(__file__).resolve().parents[2]
 
-    def _generate_audio(self, text: str, voice_id: str) -> bytes | None:
+    def _generate_audio(self, text: str, voice_id: str, language: str | None = None) -> bytes | None:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         payload = {
             "text": text,
             "model_id": self.settings.elevenlabs_tts_model_id,
             "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
         }
+        language_code = LANGUAGE_CODES.get((language or "english").strip().lower())
+        if language_code:
+            payload["language_code"] = language_code
         headers = {
             "xi-api-key": self.settings.elevenlabs_api_key,
             "Accept": "audio/mpeg",

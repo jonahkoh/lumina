@@ -60,7 +60,7 @@ async def voice_status_webhook(
 ) -> WebhookAck:
     form = dict(await request.form())
     await _validate_twilio_request(request, form, twilio)
-    _record_event(db, "voice_status", form.get("CallSid", ""), form)
+    _record_event(db, "voice_status", _voice_status_event_key(form), form)
 
     call_sid = form.get("CallSid")
     call_status = form.get("CallStatus")
@@ -72,7 +72,14 @@ async def voice_status_webhook(
                 call.completed_at = utcnow()
             elif call_status in {"failed", "busy", "no-answer", "canceled"}:
                 call.status = ScheduledCallStatus.failed
-                call.last_error = call_status
+                details = [call_status]
+                if form.get("SipResponseCode"):
+                    details.append(f"sip_response_code={form['SipResponseCode']}")
+                if form.get("ErrorCode"):
+                    details.append(f"error_code={form['ErrorCode']}")
+                if form.get("ErrorMessage"):
+                    details.append(form["ErrorMessage"])
+                call.last_error = "; ".join(details)
             db.commit()
     return WebhookAck()
 
@@ -115,6 +122,15 @@ def _record_event(db: Session, event_type: str, event_key: str, payload: dict) -
         db.commit()
     except IntegrityError:
         db.rollback()
+
+
+def _voice_status_event_key(form: dict) -> str:
+    call_sid = form.get("CallSid", "")
+    sequence = form.get("SequenceNumber")
+    status_value = form.get("CallStatus", "")
+    if sequence is not None:
+        return f"{call_sid}:{sequence}:{status_value}"
+    return f"{call_sid}:{status_value}:{utcnow().isoformat()}"
 
 
 def _normalized_inbound_body(form: dict) -> str:

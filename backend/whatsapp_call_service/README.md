@@ -136,10 +136,12 @@ WhatsApp button templates are optional. Configure Content SIDs if available; num
 2. Bot asks for the recipient phone number, for example `+6591234567`.
 3. Bot asks for a Singapore time, for example `today 3pm`, `tomorrow 9:30am`, or `9 May 2026 3:30pm`.
 4. Bot asks where the appointment is, for example the clinic or hospital name and address.
-5. User replies `YES`.
-6. Worker sends a localized WhatsApp reminder and creates the caregiver reminder call for 2 hours before the appointment, including the appointment time and destination.
+5. Bot asks for the appointment type, for example `non-fasting lab`, `cardiology review`, or `eye clinic`.
+6. Bot asks whether support is `Escort`, `Driver`, or `Both escort and driver`.
+7. User replies `YES`.
+8. Worker sends a localized WhatsApp reminder and creates the caregiver reminder call. For local testing, the actual call is scheduled 30 seconds after confirmation while the WhatsApp copy still says the reminder is 2 hours before the appointment.
 
-Instead of typing steps 3 and 4 manually, the caregiver can upload a HealthHub appointment screenshot after choosing the elderly profile. SEA-LION vision extracts the appointment time and place, and the bot moves directly to confirmation when both fields are found.
+Instead of typing steps 3 to 5 manually, the caregiver can upload a HealthHub appointment screenshot after choosing the elderly profile. SEA-LION vision or the local Windows OCR fallback extracts the appointment time, place, and appointment type when those fields are visible.
 
 Send `cancel` during the flow to stop, or after scheduling to cancel the latest pending call created by that WhatsApp user.
 
