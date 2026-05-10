@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "lastUpdated": "2026-05-09",
+  "description": "AIC Medical Escort and Transport (MET) subsidy framework. Read by eligibility.ts to compute SubsidyComputation per booking.",
+  "sources": [
+    {
+      "name": "MOH Subsidy framework for Non-Residential Long-Term Care Services",
+      "url": "https://www.moh.gov.sg/managing-expenses/schemes-and-subsidies/subsidy-framework-for-non-residential-long-term-care-services/",
+      "lastVerified": "2026-05-09",
+      "lastPublished": "2025-12-16"
+    },
+    {
+      "name": "AIC Medical Escort and Transport",
+      "url": "https://www.aic.sg/care-services/medical-escort-and-transport",
+      "lastVerified": "2026-05-09"
+    },
+    {
+      "name": "AIC Household Means Testing",
+      "url": "https://www.aic.sg/resources/means-testing",
+      "lastVerified": "2026-05-09"
+    },
+    {
+      "name": "Singapore Budget 2025: LTC subsidy enhancements (effective 1 July 2026)",
+      "url": "https://www.singaporebudget.gov.sg/budget_2025"
+    }
+  ],
+
+  "eligibility": {
+    "citizenship": ["sg_citizen", "sg_pr"],
+    "ageRequirement": "No formal minimum age. Service is for seniors who cannot travel independently for medical appointments at hospitals, specialist outpatient clinics, or polyclinics.",
+    "applicationChannels": [
+      "Doctor at hospital or polyclinic submits online",
+      "AIC Link office",
+      "Medical social worker at hospital or polyclinic"
+    ],
+    "meansTestValidityYears": 2
+  },
+
+  "baseSubsidy": {
+    "description": "Base subsidy applied as a percentage of trip cost, by Per Capita Household Income (PCHI) tier. Effective 1 October 2024.",
+    "pchiCalculation": "Total gross household monthly income divided by total number of family members at the same NRIC address.",
+    "noIncomeFallback": {
+      "description": "When household has zero income, subsidy is determined by Annual Value (AV) of property as assessed by IRAS.",
+      "avThresholdSGD": 21000,
+      "sgCitizenRate": 0.80,
+      "sgPRRate": 0.55,
+      "noteIfAVExceedsThreshold": "If AV > $21,000 with no income, subsidy rate is 0%."
+    },
+    "tiers": {
+      "sg_citizen": [
+        { "pchiMaxSGD": 900,    "subsidyRate": 0.80 },
+        { "pchiMaxSGD": 1500,   "subsidyRate": 0.75 },
+        { "pchiMaxSGD": 2300,   "subsidyRate": 0.60 },
+        { "pchiMaxSGD": 2600,   "subsidyRate": 0.50 },
+        { "pchiMaxSGD": 3600,   "subsidyRate": 0.30 },
+        { "pchiMaxSGD": null,   "subsidyRate": 0.00, "note": "PCHI > $3600" }
+      ],
+      "sg_pr": [
+        { "pchiMaxSGD": 900,    "subsidyRate": 0.55 },
+        { "pchiMaxSGD": 1500,   "subsidyRate": 0.50 },
+        { "pchiMaxSGD": 2300,   "subsidyRate": 0.40 },
+        { "pchiMaxSGD": 2600,   "subsidyRate": 0.30 },
+        { "pchiMaxSGD": 3600,   "subsidyRate": 0.15 },
+        { "pchiMaxSGD": null,   "subsidyRate": 0.00, "note": "PCHI > $3600" }
+      ]
+    }
+  },
+
+  "interimRebates": {
+    "description": "Interim Long-Term Care Rebates for MET. Stack on top of base subsidy. SG Citizens only. Effective 1 July 2025 to 30 June 2026 inclusive.",
+    "applicableTo": ["sg_citizen"],
+    "effectiveFrom": "2025-07-01T00:00:00+08:00",
+    "expiresAt": "2026-06-30T23:59:59+08:00",
+    "unitDescription": "Fixed dollar amount deducted per round-trip after base subsidy.",
+    "byServiceTier": {
+      "transport_only": [
+        { "pchiMaxSGD": 900,    "rebateSGD": 4 },
+        { "pchiMaxSGD": 1500,   "rebateSGD": 5 },
+        { "pchiMaxSGD": 2300,   "rebateSGD": 6 },
+        { "pchiMaxSGD": 2600,   "rebateSGD": 5 },
+        { "pchiMaxSGD": 3600,   "rebateSGD": 4 },
+        { "pchiMaxSGD": null,   "rebateSGD": 0 }
+      ],
+      "basic_escort_transport": [
+        { "pchiMaxSGD": 900,    "rebateSGD": 6 },
+        { "pchiMaxSGD": 1500,   "rebateSGD": 8 },
+        { "pchiMaxSGD": 2300,   "rebateSGD": 8 },
+        { "pchiMaxSGD": 2600,   "rebateSGD": 6 },
+        { "pchiMaxSGD": 3600,   "rebateSGD": 6 },
+        { "pchiMaxSGD": null,   "rebateSGD": 0 }
+      ],
+      "accompanied_escort_transport": [
+        { "pchiMaxSGD": 900,    "rebateSGD": 10 },
+        { "pchiMaxSGD": 1500,   "rebateSGD": 13 },
+        { "pchiMaxSGD": 2300,   "rebateSGD": 14 },
+        { "pchiMaxSGD": 2600,   "rebateSGD": 12 },
+        { "pchiMaxSGD": 3600,   "rebateSGD": 12 },
+        { "pchiMaxSGD": null,   "rebateSGD": 0 }
+      ]
+    }
+  },
+
+  "serviceTiers": {
+    "transport_only": "Vehicle only, no escort accompanying the senior.",
+    "basic_escort_transport": "Vehicle plus basic escort to clinic door.",
+    "accompanied_escort_transport": "Vehicle plus escort who stays through the appointment."
+  },
+
+  "costRangeReference": {
+    "description": "Approximate pre-subsidy cost range per round-trip across AIC partner providers.",
+    "perRoundTripSGD": { "min": 40, "max": 150 }
+  },
+
+  "calculationFormula": {
+    "description": "How to compute the final cost the senior pays.",
+    "steps": [
+      "1. Look up base subsidy rate from baseSubsidy.tiers[citizenship] using PCHI",
+      "2. amountAfterBaseSubsidy = baseCostSGD × (1 - subsidyRate)",
+      "3. If today <= interimRebates.expiresAt AND citizenship == sg_citizen: look up rebate from interimRebates.byServiceTier[serviceTier] using PCHI",
+      "4. finalCostSGD = max(0, amountAfterBaseSubsidy - rebateSGD)"
+    ],
+    "example": {
+      "scenario": "Auntie Tan, SG Citizen, PCHI = $800/month, basic_escort_transport, base cost $90",
+      "baseSubsidyRate": 0.80,
+      "amountAfterBaseSubsidy": 18.00,
+      "interimRebate": 6.00,
+      "finalCost": 12.00
+    }
+  },
+
+  "upcomingChanges": {
+    "description": "Subsidy enhancements announced at Budget 2025, effective 1 July 2026.",
+    "highlights": [
+      "PCHI threshold ceiling rises from $3,600 to $4,800",
+      "Home Caregiving Grant max payout rises from $400 to $600 per month",
+      "Interim rebates expire on 30 June 2026"
+    ]
+  }
+}
