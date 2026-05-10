@@ -100,7 +100,6 @@ services:
       - "8001:8001"
     env_file:
       - .env
-    # Override localhost values with internal docker-network hostnames
     environment:
       POSTGRES_HOST: postgres
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -168,6 +167,61 @@ services:
       DRIVER_SERVICE_URL: http://driver-service:8001
       ESCORT_SERVICE_URL: http://escort-service:8002
       TRIP_AUDIT_SERVICE_URL: http://trip-audit-service:8003
+      MET_ENGINE_URL: http://met-engine-service:8010
+
+  met-engine-service:
+    build:
+      context: .
+      dockerfile: backend/met_engine/Dockerfile
+    container_name: met-engine-service
+    networks:
+      - eldercare-net
+    depends_on:
+      - kafka
+      - transport-service
+    ports:
+      - "8010:8010"
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TRANSPORT_SERVICE_URL: http://transport-service:8000
+      BOT_SERVICE_URL: http://whatsapp-call-api:8004
+
+  whatsapp-call-api:
+    build:
+      context: ./backend/whatsapp_call_service
+    container_name: whatsapp-call-api
+    networks:
+      - eldercare-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://admin:password@postgres:5432/whatsapp-call-db
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8004}
+
+  whatsapp-call-worker:
+    build:
+      context: ./backend/whatsapp_call_service
+    container_name: whatsapp-call-worker
+    command: ["python", "-m", "app.worker"]
+    networks:
+      - eldercare-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      whatsapp-call-api:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://admin:password@postgres:5432/whatsapp-call-db
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8004}
 
 volumes:
   postgres_data:
