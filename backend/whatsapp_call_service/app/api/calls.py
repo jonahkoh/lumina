@@ -34,6 +34,7 @@ def create_scheduled_call(
             payload.scheduled_at,
             audio_url=audio_url,
             message_text=payload.message_text,
+            caregiver_message_text=payload.caregiver_message_text,
             appointment_location=payload.appointment_location,
             language=payload.language,
         )

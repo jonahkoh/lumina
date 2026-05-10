@@ -562,6 +562,7 @@ class ConversationEngine:
                 scheduled_at = datetime.fromisoformat(session.data["scheduled_at"])
                 reminder_at = _reminder_time_for_demo(scheduled_at)
                 message_text = self._call_message_text(session.data, scheduled_at)
+                caregiver_message_text = self._caregiver_reminder_text(session.data, scheduled_at)
                 logger.info("appointment reminder message=%s", message_text)
                 call = schedule_call(
                     db,
@@ -570,6 +571,7 @@ class ConversationEngine:
                     reminder_at,
                     requested_by_whatsapp=contact.whatsapp_address,
                     message_text=message_text,
+                    caregiver_message_text=caregiver_message_text,
                     appointment_location=session.data.get("appointment_location"),
                     language=self._call_language(db, contact, session),
                 )
@@ -757,6 +759,14 @@ class ConversationEngine:
             f"on {_format_spoken_singapore_datetime(scheduled_at)} at {data.get('appointment_location')}. "
             f"{_support_type_call_phrase(data.get('support_type'))} "
             "Please get ready a little earlier and bring what you need for the appointment. Bye bye."
+        )
+
+    def _caregiver_reminder_text(self, data: dict, scheduled_at: datetime) -> str:
+        elderly_name = _recipient_name(data)
+        return (
+            f"Your family member {elderly_name} will be picked up soon for the "
+            f"{data.get('appointment_type')} appointment at {data.get('appointment_location')}. "
+            f"We will call {elderly_name} now with the reminder."
         )
 
     def _call_language(self, db: Session, contact: Contact, session: ConversationSession) -> str:
@@ -1133,7 +1143,7 @@ def _format_spoken_singapore_datetime(value: datetime) -> str:
 
 
 def _reminder_time_for_demo(appointment_time: datetime) -> datetime:
-    return utcnow() + timedelta(seconds=30)
+    return utcnow() + timedelta(seconds=10)
 
 
 def _call_schedule_notice(appointment_time: datetime, reminder_at: datetime) -> str:

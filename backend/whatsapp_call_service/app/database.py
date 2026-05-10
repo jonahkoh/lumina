@@ -52,6 +52,11 @@ def _apply_lightweight_migrations() -> None:
         if "elderly_profiles" in inspector.get_table_names()
         else set()
     )
+    transport_trip_columns = (
+        {column["name"] for column in inspector.get_columns("transport_trips")}
+        if "transport_trips" in inspector.get_table_names()
+        else set()
+    )
     with engine.begin() as connection:
         if "role" not in contact_columns:
             connection.execute(text("ALTER TABLE contacts ADD COLUMN role VARCHAR(32)"))
@@ -59,6 +64,8 @@ def _apply_lightweight_migrations() -> None:
             connection.execute(text("ALTER TABLE contacts ADD COLUMN language_preference VARCHAR(64) DEFAULT 'english'"))
         if "message_text" not in scheduled_call_columns:
             connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN message_text TEXT"))
+        if "caregiver_message_text" not in scheduled_call_columns:
+            connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN caregiver_message_text TEXT"))
         if "appointment_location" not in scheduled_call_columns:
             connection.execute(text("ALTER TABLE scheduled_calls ADD COLUMN appointment_location TEXT"))
         if "language" not in scheduled_call_columns:
@@ -73,3 +80,5 @@ def _apply_lightweight_migrations() -> None:
             connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN transport_mode_preference VARCHAR(128)"))
         if "appointment_time_text" not in elderly_columns:
             connection.execute(text("ALTER TABLE elderly_profiles ADD COLUMN appointment_time_text TEXT"))
+        if transport_trip_columns and "status_updated_at" not in transport_trip_columns:
+            connection.execute(text("ALTER TABLE transport_trips ADD COLUMN status_updated_at DATETIME"))

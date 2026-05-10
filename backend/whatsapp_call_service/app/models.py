@@ -75,6 +75,24 @@ class ScheduledCallStatus(str, enum.Enum):
     failed = "failed"
 
 
+class TransportRole(str, enum.Enum):
+    driver = "driver"
+    escort = "escort"
+
+
+class TransportTripStatus(str, enum.Enum):
+    pending = "pending"
+    upcoming = "upcoming"
+    arriving_soon = "arriving_soon"
+    arrived_pickup = "arrived_pickup"
+    picked_up_client = "picked_up_client"
+    arrived_appointment = "arrived_appointment"
+    appointment_finished = "appointment_finished"
+    sending_home = "sending_home"
+    reached_home = "reached_home"
+    cancelled = "cancelled"
+
+
 class Contact(Base):
     __tablename__ = "contacts"
 
@@ -197,6 +215,7 @@ class ScheduledCall(Base):
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     audio_url: Mapped[str] = mapped_column(Text)
     message_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    caregiver_message_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     appointment_location: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str] = mapped_column(String(64), default="english")
     twilio_call_sid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -220,3 +239,50 @@ class TwilioEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     payload: Mapped[dict] = mapped_column(json_type(), default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TransportTrip(Base):
+    __tablename__ = "transport_trips"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    elderly_name: Mapped[str] = mapped_column(String(255))
+    elderly_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    accessibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pickup_time: Mapped[str] = mapped_column(String(32))
+    pickup_date: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pickup_location: Mapped[str] = mapped_column(Text)
+    appointment_time: Mapped[str] = mapped_column(String(32))
+    appointment_location: Mapped[str] = mapped_column(Text)
+    appointment_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    return_time: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    driver_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    escort_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    caregiver_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    caregiver_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    caregiver_whatsapp: Mapped[str | None] = mapped_column(String(48), nullable=True, index=True)
+    caregiver_language: Mapped[str] = mapped_column(String(64), default="english")
+    subsidy: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[TransportTripStatus] = mapped_column(
+        Enum(TransportTripStatus), default=TransportTripStatus.pending, index=True
+    )
+    status_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    status_events: Mapped[list["TransportTripStatusEvent"]] = orm_relationship(
+        back_populates="trip", cascade="all, delete-orphan", order_by="TransportTripStatusEvent.created_at"
+    )
+
+
+class TransportTripStatusEvent(Base):
+    __tablename__ = "transport_trip_status_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_pk)
+    trip_id: Mapped[str] = mapped_column(ForeignKey("transport_trips.id"), index=True)
+    resource_id: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[TransportRole] = mapped_column(Enum(TransportRole), index=True)
+    status: Mapped[TransportTripStatus] = mapped_column(Enum(TransportTripStatus), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    trip: Mapped[TransportTrip] = orm_relationship(back_populates="status_events")

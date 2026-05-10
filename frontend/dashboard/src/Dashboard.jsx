@@ -14,10 +14,11 @@ import {
 
 const API_BASE = '';                                 // e.g. 'http://localhost:8000' or 'https://api.carekiki.dev'
 const DASHBOARD_ENDPOINT = '/transport/dashboard';   // POST { provider_name }
-const MY_BOOKINGS_ENDPOINT = '/transport/my-bookings'; // POST { resource_id, role }
+const MY_BOOKINGS_ENDPOINT = '/api/v1/transporter/bookings'; // GET ?resource_id=&role=
 const ACCEPT_ENDPOINT = '/engine/accept';            // POST { trip_id, resource_id }
 const REJECT_ENDPOINT = '/engine/reject';            // POST { trip_id, resource_id, reason } → { next_match }
-const NOTIFY_ARRIVAL_ENDPOINT = '/engine/notify-arrival'; // POST { trip_id, resource_id }
+const STATUS_UPDATE_ENDPOINT = (tripId) => `/api/v1/transporter/trips/${tripId}/status`;
+const RESET_TRIP_ENDPOINT = (tripId) => `/api/v1/transporter/trips/${tripId}/reset`;
 const PROVIDER_NAME = 'TOUCH Community Services';
 const USE_MOCK_FALLBACK = true;                      // false → empty UI on API error
 
@@ -204,6 +205,39 @@ const STATUS_STYLES = {
   'in-progress': { label: 'In progress', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: CircleDot   },
   'upcoming':    { label: 'Upcoming',    bg: '#2B3A55', border: '#0F1B30', text: '#F1F0EA', accent: '#7E9DD0', Icon: CircleDashed },
   'pending':     { label: 'Pending',     bg: '#7B5BA6', border: '#4D3873', text: '#F5F0FA', accent: '#C9B3E0', Icon: Inbox       },
+  'arriving_soon': { label: 'Arriving soon', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: CircleDot },
+  'arrived_pickup': { label: 'At pickup', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: MapPin },
+  'picked_up_client': { label: 'Picked up', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: Users },
+  'arrived_appointment': { label: 'At appointment', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: Building2 },
+  'appointment_finished': { label: 'Appointment done', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: Check },
+  'sending_home': { label: 'Sending home', bg: '#C9622A', border: '#8C3F14', text: '#FDF7E8', accent: '#F4A464', Icon: Car },
+  'reached_home': { label: 'Reached home', bg: '#1F5F4F', border: '#0E3D31', text: '#F4F1E8', accent: '#7FCBA9', Icon: CircleCheck },
+};
+
+const TRANSPORT_STATUS_STEPS = [
+  { id: 'arriving_soon', label: 'Arriving in 10 mins', detail: 'Notify caregiver before pickup', Icon: Bell },
+  { id: 'arrived_pickup', label: 'Arrived at pickup point', detail: 'Transport is at the elderly person’s home', Icon: MapPin },
+  { id: 'picked_up_client', label: 'Picked up elderly/family member', detail: 'Client is in vehicle or with escort', Icon: Users },
+  { id: 'arrived_appointment', label: 'Arrived at appointment location', detail: 'Reached hospital, specialist clinic, or polyclinic', Icon: Building2 },
+  { id: 'appointment_finished', label: 'Finished appointment', detail: 'Appointment or treatment is complete', Icon: Check },
+  { id: 'sending_home', label: 'Sending home', detail: 'Return trip has started', Icon: Car },
+  { id: 'reached_home', label: 'Reached home', detail: 'Client is safely back home', Icon: CircleCheck },
+];
+
+const currentStatusIndex = (status) => TRANSPORT_STATUS_STEPS.findIndex(step => step.id === status);
+
+const nextTransportStatus = (status) => {
+  if (status === 'upcoming' || status === 'in-progress') return TRANSPORT_STATUS_STEPS[0]?.id;
+  const index = currentStatusIndex(status);
+  if (index < 0 || index >= TRANSPORT_STATUS_STEPS.length - 1) return null;
+  return TRANSPORT_STATUS_STEPS[index + 1].id;
+};
+
+const formatStatusTime = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -211,7 +245,8 @@ const STATUS_STYLES = {
 // ─────────────────────────────────────────────────────────────────────
 
 export default function CarekikiDashboard() {
-  const [view, setView] = useState('admin'); // 'admin' | 'driver-escort'
+  const transporterRoute = window.location.pathname === '/transporter';
+  const [view, setView] = useState(transporterRoute ? 'driver-escort' : 'admin'); // 'admin' | 'driver-escort'
   const [toast, setToast] = useState(null);
   const [selectedTripId, setSelectedTripId] = useState('t2');
   const [activeTab, setActiveTab] = useState('drivers');
@@ -604,6 +639,72 @@ export default function CarekikiDashboard() {
           cursor: not-allowed; transform: none;
         }
 
+        .ck-journey-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .ck-journey-step {
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr) auto;
+          gap: 12px;
+          align-items: center;
+          padding: 12px;
+          border-radius: 12px;
+          border: 1px solid var(--ck-line);
+          background: var(--ck-bg);
+        }
+        .ck-journey-step.completed {
+          background: #E6EFE8;
+          border-color: #C4DACA;
+        }
+        .ck-journey-step.next {
+          background: #FDF7E8;
+          border-color: #E4B47A;
+        }
+        .ck-journey-icon {
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--ck-bg-2);
+          color: var(--ck-ink-3);
+        }
+        .ck-journey-step.completed .ck-journey-icon {
+          background: var(--ck-primary);
+          color: var(--ck-surface);
+        }
+        .ck-journey-step.next .ck-journey-icon {
+          background: var(--ck-amber);
+          color: var(--ck-surface);
+        }
+        .ck-journey-action {
+          min-width: 170px;
+          padding: 10px 14px;
+          border-radius: 9px;
+          border: 1px solid var(--ck-line);
+          background: var(--ck-surface);
+          color: var(--ck-ink-3);
+          display: inline-flex;
+          justify-content: center;
+          align-items: center;
+          gap: 7px;
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .ck-journey-step.next .ck-journey-action {
+          background: var(--ck-amber);
+          color: var(--ck-surface);
+          border-color: #8C3F14;
+        }
+        .ck-journey-action:disabled {
+          cursor: not-allowed;
+          opacity: 0.65;
+        }
+
         /* ─── Modal ─── */
         @keyframes ck-fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes ck-pop-in { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
@@ -697,20 +798,22 @@ export default function CarekikiDashboard() {
         <div className="max-w-[1400px] mx-auto px-8 py-8">
 
           {/* ─── VIEW SWITCHER ─── */}
-          <div className="ck-view-switcher">
-            <button
-              className={`ck-view-tab ${view === 'admin' ? 'active' : ''}`}
-              onClick={() => setView('admin')}
-            >
-              <Building2 size={16}/> Admin Dashboard
-            </button>
-            <button
-              className={`ck-view-tab ${view === 'driver-escort' ? 'active' : ''}`}
-              onClick={() => setView('driver-escort')}
-            >
-              <UserCircle size={16}/> Driver / Escort
-            </button>
-          </div>
+          {!transporterRoute && (
+            <div className="ck-view-switcher">
+              <button
+                className={`ck-view-tab ${view === 'admin' ? 'active' : ''}`}
+                onClick={() => setView('admin')}
+              >
+                <Building2 size={16}/> Admin Dashboard
+              </button>
+              <button
+                className={`ck-view-tab ${view === 'driver-escort' ? 'active' : ''}`}
+                onClick={() => setView('driver-escort')}
+              >
+                <UserCircle size={16}/> Driver / Escort
+              </button>
+            </div>
+          )}
 
           {view === 'driver-escort' && (
             <DriverEscortView
@@ -1076,10 +1179,36 @@ function DriverEscortView({ drivers, escorts, trips, showToast }) {
   const [current, setCurrent] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rejectingTrip, setRejectingTrip] = useState(null);
-  const [arrivalNotified, setArrivalNotified] = useState({}); // { tripId: true }
-  const [actionLoading, setActionLoading] = useState({});     // { tripId: 'accept' | 'reject' | 'arrival' }
+  const [actionLoading, setActionLoading] = useState({});     // { tripId: 'accept' | 'reject' | statusId }
 
   const me = roster.find(r => r.id === selectedId);
+
+  const loadBookings = async (resource = me) => {
+    if (!resource) return;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ resource_id: resource.id, role: resource.role });
+      const res = await fetch(`${API_BASE}${MY_BOOKINGS_ENDPOINT}?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setPending(data.pending || []);
+      setCurrent(data.current || null);
+    } catch (err) {
+      if (USE_MOCK_FALLBACK) {
+        const idField = resource.role === 'driver' ? 'driverId' : 'escortId';
+        const myPending = MOCK_PENDING.filter(p => p[idField] === resource.id);
+        const myCurrent = trips.find(t =>
+          t[idField] === resource.id && (t.status === 'in-progress' || t.status === 'upcoming')
+        );
+        setPending(myPending);
+        setCurrent(myCurrent || null);
+      } else {
+        setPending([]); setCurrent(null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Fetch pending + current bookings whenever identity changes
   useEffect(() => {
@@ -1088,11 +1217,8 @@ function DriverEscortView({ drivers, escorts, trips, showToast }) {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}${MY_BOOKINGS_ENDPOINT}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resource_id: me.id, role: me.role }),
-        });
+        const params = new URLSearchParams({ resource_id: me.id, role: me.role });
+        const res = await fetch(`${API_BASE}${MY_BOOKINGS_ENDPOINT}?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
@@ -1130,7 +1256,7 @@ function DriverEscortView({ drivers, escorts, trips, showToast }) {
       }).catch(() => null); // swallow for mock fallback
       // optimistic: remove from pending, set as current
       setPending(p => p.filter(x => x.id !== trip.id));
-      setCurrent({ ...trip, status: 'upcoming' });
+      setCurrent({ ...trip, status: 'upcoming', statusHistory: trip.statusHistory || [] });
       showToast(`Accepted booking for ${trip.elderly}`);
       setActiveTab('current');
     } finally {
@@ -1169,17 +1295,72 @@ function DriverEscortView({ drivers, escorts, trips, showToast }) {
     }
   };
 
-  const handleNotifyArrival = async () => {
+  const handleStatusUpdate = async (statusId) => {
     if (!current) return;
-    setActionLoading(s => ({ ...s, [current.id]: 'arrival' }));
+    setActionLoading(s => ({ ...s, [current.id]: statusId }));
+    const timestamp = new Date().toISOString();
+    const event = { id: `local-${current.id}-${statusId}`, status: statusId, resourceId: me.id, role: me.role, createdAt: timestamp };
     try {
-      await fetch(`${API_BASE}${NOTIFY_ARRIVAL_ENDPOINT}`, {
+      const res = await fetch(`${API_BASE}${STATUS_UPDATE_ENDPOINT(current.id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trip_id: current.id, resource_id: me.id }),
-      }).catch(() => null);
-      setArrivalNotified(s => ({ ...s, [current.id]: true }));
-      showToast(`Caregiver notified · 10 mins ETA`);
+        body: JSON.stringify({ resource_id: me.id, role: me.role, status: statusId }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {}
+        await loadBookings(me);
+        showToast(`Status not updated · ${detail}`);
+        return;
+      }
+      const data = await res.json();
+      setCurrent(data.trip || { ...current, status: statusId, statusHistory: [...(current.statusHistory || []), event] });
+      showToast(`Caregiver notified · ${TRANSPORT_STATUS_STEPS.find(step => step.id === statusId)?.label}`);
+    } catch (err) {
+      if (USE_MOCK_FALLBACK) {
+        setCurrent({ ...current, status: statusId, statusHistory: [...(current.statusHistory || []), event] });
+        showToast(`Caregiver notified · ${TRANSPORT_STATUS_STEPS.find(step => step.id === statusId)?.label}`);
+      } else {
+        showToast(`Status update failed`);
+      }
+    } finally {
+      setActionLoading(s => { const n = { ...s }; delete n[current.id]; return n; });
+    }
+  };
+
+  const handleResetTrip = async () => {
+    if (!current) return;
+    setActionLoading(s => ({ ...s, [current.id]: 'reset' }));
+    try {
+      const res = await fetch(`${API_BASE}${RESET_TRIP_ENDPOINT(current.id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resource_id: me.id, role: me.role }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          detail = body.detail || detail;
+        } catch {}
+        showToast(`Reset failed · ${detail}`);
+        return;
+      }
+      const data = await res.json();
+      setPending(data.pending || []);
+      setCurrent(data.current || { ...current, status: 'upcoming', statusHistory: [] });
+      setActiveTab('current');
+      showToast(`Trip reset`);
+    } catch (err) {
+      if (USE_MOCK_FALLBACK) {
+        setCurrent({ ...current, status: 'upcoming', statusHistory: [] });
+        showToast(`Trip reset`);
+      } else {
+        showToast(`Reset failed`);
+      }
     } finally {
       setActionLoading(s => { const n = { ...s }; delete n[current.id]; return n; });
     }
@@ -1283,9 +1464,9 @@ function DriverEscortView({ drivers, escorts, trips, showToast }) {
           <CurrentBookingCard
             trip={current}
             role={me.role}
-            onNotifyArrival={handleNotifyArrival}
-            arrivalNotified={!!arrivalNotified[current.id]}
-            arrivalLoading={actionLoading[current.id] === 'arrival'}
+            onStatusUpdate={handleStatusUpdate}
+            onResetTrip={handleResetTrip}
+            actionLoading={actionLoading[current.id]}
           />
         ) : (
           <div className="ck-card p-12 text-center">
@@ -1425,9 +1606,15 @@ function RequestDetailBlock({ label, icon: Icon, children }) {
 // Current booking card
 // ─────────────────────────────────────────────────────────────────────
 
-function CurrentBookingCard({ trip, role, onNotifyArrival, arrivalNotified, arrivalLoading }) {
+function CurrentBookingCard({ trip, role, onStatusUpdate, onResetTrip, actionLoading }) {
   const status = STATUS_STYLES[trip.status] || STATUS_STYLES.upcoming;
   const StatusIcon = status.Icon;
+  const historyByStatus = useMemo(() => {
+    const map = {};
+    (trip.statusHistory || []).forEach(event => { map[event.status] = event; });
+    return map;
+  }, [trip.statusHistory]);
+  const nextStatus = nextTransportStatus(trip.status);
 
   return (
     <div className="ck-card overflow-hidden">
@@ -1439,9 +1626,20 @@ function CurrentBookingCard({ trip, role, onNotifyArrival, arrivalNotified, arri
             Age {trip.age} · {trip.accessibility === 'wheelchair' ? 'Wheelchair user' : 'Ambulant'}
           </div>
         </div>
-        <span className="ck-status-pill" style={{background: 'rgba(255,255,255,0.18)', color: status.text}}>
-          <StatusIcon size={12} className={trip.status === 'in-progress' ? 'ck-pulse' : ''}/> {status.label}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            className="ck-journey-action"
+            style={{background: 'rgba(255,255,255,0.18)', color: status.text, borderColor: 'rgba(255,255,255,0.28)'}}
+            onClick={onResetTrip}
+            disabled={!!actionLoading}
+          >
+            {actionLoading === 'reset' ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14}/>}
+            Reset
+          </button>
+          <span className="ck-status-pill" style={{background: 'rgba(255,255,255,0.18)', color: status.text}}>
+            <StatusIcon size={12} className={trip.status === 'in-progress' ? 'ck-pulse' : ''}/> {status.label}
+          </span>
+        </div>
       </div>
 
       <div className="p-6 space-y-5">
@@ -1495,26 +1693,43 @@ function CurrentBookingCard({ trip, role, onNotifyArrival, arrivalNotified, arri
           </div>
         )}
 
-        {/* Notify arrival button */}
+        {/* MET journey status */}
         <div className="pt-3">
-          <button
-            className="ck-notify-btn"
-            onClick={onNotifyArrival}
-            disabled={arrivalNotified || arrivalLoading}
-          >
-            {arrivalLoading ? (
-              <><Loader2 size={18} className="animate-spin"/> Notifying caregiver…</>
-            ) : arrivalNotified ? (
-              <><Check size={18}/> Caregiver notified · awaiting pickup</>
-            ) : (
-              <><Bell size={18}/> I am 10 mins away</>
-            )}
-          </button>
-          {!arrivalNotified && !arrivalLoading && (
-            <div className="text-[11px] text-center mt-2" style={{color: 'var(--ck-ink-3)'}}>
-              Sends a WhatsApp notification to {trip.caregiver}
-            </div>
-          )}
+          <div className="text-[10px] font-bold uppercase tracking-[0.16em] mb-3" style={{color: 'var(--ck-ink-3)'}}>
+            MET journey updates
+          </div>
+          <div className="ck-journey-list">
+            {TRANSPORT_STATUS_STEPS.map(step => {
+              const event = historyByStatus[step.id];
+              const completed = !!event || currentStatusIndex(trip.status) >= currentStatusIndex(step.id);
+              const isNext = nextStatus === step.id;
+              const StepIcon = step.Icon;
+              return (
+                <div key={step.id} className={`ck-journey-step ${completed ? 'completed' : ''} ${isNext ? 'next' : ''}`}>
+                  <div className="ck-journey-icon">
+                    {completed ? <Check size={16}/> : <StepIcon size={16}/>}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-bold">{step.label}</div>
+                    <div className="text-[11px] mt-0.5" style={{color: 'var(--ck-ink-3)'}}>
+                      {completed ? `Updated ${formatStatusTime(event?.createdAt) || ''}` : step.detail}
+                    </div>
+                  </div>
+                  <button
+                    className="ck-journey-action"
+                    disabled={!isNext || !!actionLoading}
+                    onClick={() => onStatusUpdate(step.id)}
+                  >
+                    {actionLoading === step.id ? <Loader2 size={14} className="animate-spin"/> : completed ? <Check size={14}/> : <Bell size={14}/>}
+                    {completed ? 'Done' : isNext ? 'Update' : 'Locked'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="text-[11px] text-center mt-3" style={{color: 'var(--ck-ink-3)'}}>
+            Each update sends a WhatsApp notification to {trip.caregiver}.
+          </div>
         </div>
       </div>
     </div>

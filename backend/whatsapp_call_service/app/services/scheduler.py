@@ -20,6 +20,7 @@ def schedule_call(
     audio_url: str | None = None,
     requested_by_whatsapp: str | None = None,
     message_text: str | None = None,
+    caregiver_message_text: str | None = None,
     appointment_location: str | None = None,
     language: str = "english",
 ) -> ScheduledCall:
@@ -29,6 +30,7 @@ def schedule_call(
         scheduled_at=_as_utc(scheduled_at),
         audio_url=audio_url or settings.twilio_static_call_audio_url,
         message_text=message_text,
+        caregiver_message_text=caregiver_message_text,
         appointment_location=appointment_location,
         language=(language or "english").strip().lower() or "english",
     )
@@ -75,7 +77,12 @@ def execute_due_call(
         db.commit()
         call_text = _localized_text(settings, call.message_text, call.language, translation)
         caregiver_language = _caregiver_language(db, call)
-        reminder_text = _localized_text(settings, call.message_text, caregiver_language, translation)
+        reminder_text = _localized_text(
+            settings,
+            call.caregiver_message_text or call.message_text,
+            caregiver_language,
+            translation,
+        )
         _send_whatsapp_reminder(db, twilio, call, reminder_text)
         _prepare_call_audio(settings, call, call_text, audio)
         db.commit()

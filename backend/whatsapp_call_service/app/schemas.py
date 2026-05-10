@@ -3,7 +3,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from app.models import ContactRole, MessageStatus, MobilityLevel, ScheduledCallStatus
+from app.models import (
+    ContactRole,
+    MessageStatus,
+    MobilityLevel,
+    ScheduledCallStatus,
+    TransportRole,
+    TransportTripStatus,
+)
 
 
 class MessageSendRequest(BaseModel):
@@ -24,6 +31,7 @@ class ScheduleCallRequest(BaseModel):
     scheduled_at: datetime
     audio_url: HttpUrl | None = None
     message_text: str | None = Field(default=None, min_length=1, max_length=1600)
+    caregiver_message_text: str | None = Field(default=None, min_length=1, max_length=1600)
     appointment_location: str | None = Field(default=None, min_length=1, max_length=1000)
     language: str = "english"
 
@@ -34,6 +42,7 @@ class ScheduledCallResponse(BaseModel):
     scheduled_at: datetime
     audio_url: str
     message_text: str | None = None
+    caregiver_message_text: str | None = None
     appointment_location: str | None = None
     language: str
     status: ScheduledCallStatus
@@ -135,3 +144,54 @@ class ContactProfileResponse(BaseModel):
     caregiver: CaregiverProfileResponse | None = None
     elderly: ElderlyProfileResponse | None = None
     linked_elderly: list[ElderlyProfileResponse] = Field(default_factory=list)
+
+
+class TransportStatusEventResponse(BaseModel):
+    id: UUID
+    trip_id: str
+    resource_id: str
+    role: TransportRole
+    status: TransportTripStatus
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TransportTripResponse(BaseModel):
+    id: str
+    elderly: str
+    age: int | None = None
+    accessibility: str | None = None
+    pickup: dict
+    appointment: dict
+    returnTime: str | None = None
+    driverId: str | None = None
+    escortId: str | None = None
+    caregiver: str | None = None
+    caregiverPhone: str | None = None
+    subsidy: str | None = None
+    notes: str | None = None
+    status: str
+    statusHistory: list[dict] = Field(default_factory=list)
+
+
+class TransportBookingsResponse(BaseModel):
+    pending: list[TransportTripResponse] = Field(default_factory=list)
+    current: TransportTripResponse | None = None
+
+
+class TransportStatusUpdateRequest(BaseModel):
+    resource_id: str = Field(..., min_length=1, max_length=64)
+    role: TransportRole
+    status: TransportTripStatus
+
+
+class TransportTripResetRequest(BaseModel):
+    resource_id: str = Field(..., min_length=1, max_length=64)
+    role: TransportRole
+
+
+class TransportStatusUpdateResponse(BaseModel):
+    trip: TransportTripResponse
+    event: TransportStatusEventResponse
+    message: MessageSendResponse | None = None
