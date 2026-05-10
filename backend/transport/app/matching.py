@@ -11,6 +11,7 @@ from app.schemas import DriverMatch, EscortMatch, MatchResult, TripNeeds, TripRe
 
 _CANDIDATE_TTL = 10800   # 3 hours
 _COMPOSITION_TTL = 43200  # 12 hours
+_CONTEXT_TTL = 43200      # 12 hours
 
 
 def _vehicle_type_from_flags(mobility_flags: list[str]) -> str:
@@ -117,6 +118,44 @@ async def pop_next_escort(trip_id: uuid.UUID) -> Optional[str]:
         return await r.lpop(f"candidates:escort:{trip_id}")
 
 
+async def store_trip_context(trip_id: uuid.UUID, trip_request: TripRequest) -> None:
+    """Store full trip details so fallback re-offers can reconstruct the payload."""
+    vehicle_type = _vehicle_type_from_flags(trip_request.mobility_flags)
+    context = {
+        "elderly_id": str(trip_request.elderly_id),
+        "caregiver_id": str(trip_request.caregiver_id),
+        "pickup_location": trip_request.pickup_location.model_dump(),
+        "dropoff_location": trip_request.dropoff_location.model_dump(),
+        "appointment_datetime": trip_request.appointment_datetime.isoformat(),
+        "elderly_needs": trip_request.elderly_needs,
+        "mobility_flags": trip_request.mobility_flags,
+        "preferred_languages": trip_request.preferred_languages,
+        "vehicle_type": vehicle_type,
+        "estimated_price": compute_price(vehicle_type),
+    }
+    async with _redis() as r:
+        await r.set(f"trip:context:{trip_id}", json.dumps(context))
+        await r.expire(f"trip:context:{trip_id}", _CONTEXT_TTL)
+
+
+async def get_trip_context(trip_id: uuid.UUID) -> Optional[dict]:
+    async with _redis() as r:
+        raw = await r.get(f"trip:context:{trip_id}")
+    return json.loads(raw) if raw else None
+
+
+async def update_trip_assignment(trip_id: uuid.UUID, **kwargs) -> None:
+    """Patch specific fields in the assignment hash (used when re-offering to new candidate)."""
+    async with _redis() as r:
+        raw = await r.get(f"trip:assignment:{trip_id}")
+        if not raw:
+            return
+        assignment = json.loads(raw)
+        assignment.update({k: v for k, v in kwargs.items()})
+        await r.set(f"trip:assignment:{trip_id}", json.dumps(assignment))
+        await r.expire(f"trip:assignment:{trip_id}", _COMPOSITION_TTL)
+
+
 # ── composition + assignment helpers ─────────────────────────────────────────
 
 async def get_trip_composition(trip_id: uuid.UUID) -> Optional[dict]:
@@ -168,6 +207,7 @@ async def cleanup_trip_redis(trip_id: uuid.UUID) -> None:
         await r.delete(
             f"trip:composition:{trip_id}",
             f"trip:assignment:{trip_id}",
+            f"trip:context:{trip_id}",
             f"candidates:driver:{trip_id}",
             f"candidates:escort:{trip_id}",
         )
@@ -236,6 +276,12 @@ async def match_trip(trip_request: TripRequest) -> MatchResult:
     driver = drivers[0]
     escort = escorts[0]
     vehicle_type = _vehicle_type_from_flags(trip_request.mobility_flags)
+
+    # Store full context for fallback re-offer reconstruction, then consume the
+    # first driver/escort from the Redis lists so pop_next_* returns the next-best.
+    await store_trip_context(trip_request.trip_id, trip_request)
+    await pop_next_driver(trip_request.trip_id)
+    await pop_next_escort(trip_request.trip_id)
 
     await _store_composition_and_assignment(
         trip_request.trip_id, driver, escort,

@@ -12,7 +12,14 @@ import redis.asyncio as aioredis
 from app import dashboard as dash
 from app.config import settings
 from app.kafka_client import publish
-from app.matching import cleanup_trip_redis, get_trip_assignment, match_trip, pop_next_driver, pop_next_escort
+from app.matching import (
+    cleanup_trip_redis,
+    get_trip_assignment,
+    get_trip_composition,
+    match_trip,
+    pop_next_driver,
+    pop_next_escort,
+)
 from app.schemas import (
     MatchResult,
     ReachingBody,
@@ -48,6 +55,38 @@ async def trip_status(trip_id: uuid.UUID):
         has_candidates=bool(has_driver or has_escort),
         confirmed=bool(confirmed),
     )
+
+
+@router.get("/trips/{trip_id}/assignment")
+async def trip_assignment(trip_id: uuid.UUID):
+    """Return the current Redis assignment (primary driver/escort) for a trip."""
+    assignment = await get_trip_assignment(trip_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Trip assignment not found")
+    composition = await get_trip_composition(trip_id)
+    return {
+        "trip_id": str(trip_id),
+        "driver_id": assignment.get("driver_id"),
+        "escort_id": assignment.get("escort_id"),
+        "trip_type": composition.get("trip_type") if composition else None,
+        "driver_confirmed": composition.get("driver_confirmed") if composition else None,
+        "escort_confirmed": composition.get("escort_confirmed") if composition else None,
+    }
+
+
+@router.get("/trips/{trip_id}/candidates")
+async def trip_candidates(trip_id: uuid.UUID):
+    """Return the remaining fallback queues for a trip (ordered: next to be offered is first)."""
+    async with _redis() as r:
+        drivers = await r.lrange(f"candidates:driver:{trip_id}", 0, -1)
+        escorts = await r.lrange(f"candidates:escort:{trip_id}", 0, -1)
+    return {
+        "trip_id": str(trip_id),
+        "fallback_drivers": drivers,   # list of UUIDs in offer order
+        "fallback_escorts": escorts,   # list of UUIDs in offer order
+        "driver_fallbacks_remaining": len(drivers),
+        "escort_fallbacks_remaining": len(escorts),
+    }
 
 
 @router.post("/trips/{trip_id}/cancel")

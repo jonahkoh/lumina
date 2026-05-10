@@ -28,6 +28,7 @@ class TripAuditCreate(BaseModel):
 
     trip_type: Optional[TripType] = None
     reason: Optional[str] = None
+    aic_hotline: Optional[str] = None
 
 
 class TripAuditResponse(BaseModel):
@@ -52,6 +53,7 @@ class TripAuditResponse(BaseModel):
 
     trip_type: Optional[TripType] = None
     reason: Optional[str] = None
+    aic_hotline: Optional[str] = None
 
     created_at: datetime
 

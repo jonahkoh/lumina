@@ -44,5 +44,6 @@ class TripAudit(Base):
 
     trip_type = Column(SAEnum(TripType, name="triptype"), nullable=True)
     reason = Column(String, nullable=True)
+    aic_hotline = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

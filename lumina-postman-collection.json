@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "lumina-eldercare-v1",
+    "_postman_id": "lumina-eldercare-v2",
     "name": "Lumina ElderCare API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -11,10 +11,17 @@
     { "key": "transport_base", "value": "http://localhost:8000", "type": "string" },
     { "key": "provider_id", "value": "11111111-1111-1111-1111-111111111111", "type": "string" },
     { "key": "driver_id", "value": "", "type": "string" },
+    { "key": "driver2_id", "value": "", "type": "string" },
     { "key": "escort_id", "value": "", "type": "string" },
+    { "key": "escort2_id", "value": "", "type": "string" },
     { "key": "trip_id", "value": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "type": "string" },
     { "key": "elderly_id", "value": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "type": "string" },
-    { "key": "caregiver_id", "value": "cccccccc-cccc-cccc-cccc-cccccccccccc", "type": "string" }
+    { "key": "caregiver_id", "value": "cccccccc-cccc-cccc-cccc-cccccccccccc", "type": "string" },
+    { "key": "ranking_trip_id", "value": "dddddddd-dddd-dddd-dddd-dddddddddddd", "type": "string" },
+    { "key": "primary_driver_id", "value": "", "type": "string" },
+    { "key": "fallback_driver_id", "value": "", "type": "string" },
+    { "key": "primary_escort_id", "value": "", "type": "string" },
+    { "key": "fallback_escort_id", "value": "", "type": "string" }
   ],
   "item": [
     {
@@ -325,6 +332,19 @@
           }
         },
         {
+          "name": "List Audits - Filter by outcome NO_MATCH",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{audit_base}}/trips?outcome=NO_MATCH",
+              "host": ["{{audit_base}}"],
+              "path": ["trips"],
+              "query": [{ "key": "outcome", "value": "NO_MATCH" }]
+            }
+          }
+        },
+        {
           "name": "Get Audit by Trip ID",
           "request": {
             "method": "GET",
@@ -369,6 +389,24 @@
             "method": "GET",
             "header": [],
             "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/status", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "status"] }
+          }
+        },
+        {
+          "name": "Get Trip Assignment (shows primary driver/escort + confirmation state)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/assignment", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "assignment"] },
+            "description": "Returns the currently assigned driver_id and escort_id from Redis, plus driver_confirmed / escort_confirmed flags. Use this to identify who is the PRIMARY driver before triggering a rejection in ranking tests."
+          }
+        },
+        {
+          "name": "Get Trip Candidates (shows fallback queue — works for N drivers/escorts)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{transport_base}}/transport/trips/{{trip_id}}/candidates", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{trip_id}}", "candidates"] },
+            "description": "Returns the remaining fallback queues (fallback_drivers, fallback_escorts). These are ordered lists — the first entry is who gets offered next if the current primary rejects. When a rejection is processed the first entry is popped off this list. The list can contain any number of fallbacks; it is empty once all candidates have been tried."
           }
         },
         {
@@ -698,6 +736,797 @@
             "header": [],
             "url": { "raw": "{{driver_base}}/drivers/{{driver_id}}", "host": ["{{driver_base}}"], "path": ["drivers", "{{driver_id}}"] }
           }
+        }
+      ]
+    },
+    {
+      "name": "7. Ranking & Fallback Testing",
+      "description": "Tests for driver/escort rejection cascading to the next-best candidate, and for trip.no_match with AIC hotline when all candidates are exhausted.\n\nPRE-REQUISITE: Use a fresh ranking_trip_id (variable: {{ranking_trip_id}}) so it doesn't clash with the Full Flow trip. The default is dddddddd-dddd-dddd-dddd-dddddddddddd.\n\nScenario A — Driver fallback (2 drivers, 1 escort): First driver rejects → re-offer to second driver → second driver accepts.\nScenario B — No drivers (1 driver, all reject) → trip.no_match with AIC hotline in audit.\nScenario C — Escort fallback (1 driver, 2 escorts): Escort 1 rejects → re-offer to Escort 2 → Escort 2 accepts.\nScenario D — No escorts (1 escort, rejects) → trip.no_match with AIC hotline in audit.",
+      "item": [
+        {
+          "name": "── SCENARIO A: Driver Fallback ──",
+          "item": [
+            {
+              "name": "[A-1] Create Driver 1 (primary candidate)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var json = pm.response.json();",
+                      "    pm.collectionVariables.set('driver_id', json.driver_id);",
+                      "    pm.test('Driver 1 created (primary)', function() {",
+                      "        pm.expect(json.status).to.equal('AVAILABLE');",
+                      "    });",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"RankTest Transport\",\n  \"provider_address\": \"1 Yishun Ave, Singapore 760001\",\n  \"provider_phone\": \"+6591110001\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Driver Alpha\",\n  \"phone\": \"+6591110011\",\n  \"vehicle_type\": \"STANDARD\",\n  \"service_areas\": [\"Tampines\"],\n  \"capability_flags\": [],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+                },
+                "url": { "raw": "{{driver_base}}/drivers", "host": ["{{driver_base}}"], "path": ["drivers"] }
+              }
+            },
+            {
+              "name": "[A-2] Create Driver 2 (fallback candidate)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var json = pm.response.json();",
+                      "    pm.collectionVariables.set('driver2_id', json.driver_id);",
+                      "    pm.test('Driver 2 created (fallback)', function() {",
+                      "        pm.expect(json.status).to.equal('AVAILABLE');",
+                      "    });",
+                      "    console.log('Driver 2 ID (fallback):', json.driver_id);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"RankTest Transport\",\n  \"provider_address\": \"2 Yishun Ave, Singapore 760002\",\n  \"provider_phone\": \"+6591110002\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Driver Beta\",\n  \"phone\": \"+6591110022\",\n  \"vehicle_type\": \"STANDARD\",\n  \"service_areas\": [\"Tampines\"],\n  \"capability_flags\": [],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+                },
+                "url": { "raw": "{{driver_base}}/drivers", "host": ["{{driver_base}}"], "path": ["drivers"] }
+              }
+            },
+            {
+              "name": "[A-3] Create Escort for Scenario A",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var json = pm.response.json();",
+                      "    pm.collectionVariables.set('escort_id', json.escort_id);",
+                      "    pm.test('Escort created', function() {",
+                      "        pm.expect(json.status).to.equal('AVAILABLE');",
+                      "    });",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"RankTest Care\",\n  \"provider_address\": \"3 Tampines St, Singapore 520003\",\n  \"provider_phone\": \"+6591110003\",\n  \"provider_location\": { \"lat\": 1.35, \"lng\": 103.82 },\n  \"name\": \"Escort Alpha\",\n  \"phone\": \"+6591110033\",\n  \"languages\": [\"english\"],\n  \"specialisations\": [],\n  \"service_areas\": [\"Tampines\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+                },
+                "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+              }
+            },
+            {
+              "name": "[A-4] Submit Trip (Tampines service area — uses ranking_trip_id)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Trip submitted for matching', function() {",
+                      "    pm.expect(pm.response.code).to.equal(202);",
+                      "});",
+                      "console.log('Wait ~3 seconds for Kafka to process, then run A-4b to identify the primary driver.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"trip_id\": \"{{ranking_trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.36, \"lng\": 103.94 },\n  \"dropoff_location\": { \"lat\": 1.37, \"lng\": 103.95 },\n  \"appointment_datetime\": \"2026-07-15T09:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Tampines\"\n}"
+                },
+                "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+              }
+            },
+            {
+              "name": "[A-4b] Get Trip Assignment (identifies PRIMARY driver — run after ~3s)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Assignment exists with driver and escort', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.expect(json.driver_id).to.be.a('string');",
+                      "    pm.expect(json.escort_id).to.be.a('string');",
+                      "});",
+                      "var json = pm.response.json();",
+                      "pm.collectionVariables.set('primary_driver_id', json.driver_id);",
+                      "pm.collectionVariables.set('primary_escort_id', json.escort_id);",
+                      "console.log('--- trip:assignment ---');",
+                      "console.log('PRIMARY driver (offered, will reject in A-5):', json.driver_id);",
+                      "console.log('PRIMARY escort (offered):', json.escort_id);",
+                      "console.log('');",
+                      "console.log('WHY is escort not visible as a candidates:escort key?');",
+                      "console.log('  candidates:escort holds FALLBACK escorts only.');",
+                      "console.log('  With 1 escort registered: escort becomes primary → fallback queue is empty → Redis auto-deletes empty lists.');",
+                      "console.log('  With 2+ escorts: candidates:escort shows the remaining fallbacks in offer order.');",
+                      "console.log('');",
+                      "console.log('TIP: Run GET /candidates to see remaining fallback queues for this trip.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transport_base}}/transport/trips/{{ranking_trip_id}}/assignment",
+                  "host": ["{{transport_base}}"],
+                  "path": ["transport", "trips", "{{ranking_trip_id}}", "assignment"]
+                },
+                "description": "Reads trip:assignment:{trip_id} from Redis. driver_id = PRIMARY driver currently assigned and offered. escort_id = PRIMARY escort. The FALLBACK queue (candidates:driver key) holds any remaining drivers in offer order — check GET /candidates to see them."
+              }
+            },
+            {
+              "name": "[A-4c] Get Trip Candidates (see fallback queue — should show 1 fallback driver)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Fallback queue visible', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.test('1 driver fallback remaining', function() {",
+                      "        pm.expect(json.driver_fallbacks_remaining).to.equal(1);",
+                      "    });",
+                      "    pm.test('0 escort fallbacks (only 1 escort registered)', function() {",
+                      "        pm.expect(json.escort_fallbacks_remaining).to.equal(0);",
+                      "    });",
+                      "    console.log('Fallback drivers (will be offered in this order if primary rejects):', json.fallback_drivers);",
+                      "    console.log('Fallback escorts:', json.fallback_escorts, '(empty — only 1 escort registered)');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transport_base}}/transport/trips/{{ranking_trip_id}}/candidates",
+                  "host": ["{{transport_base}}"],
+                  "path": ["transport", "trips", "{{ranking_trip_id}}", "candidates"]
+                },
+                "description": "Shows how many fallback drivers/escorts remain. This is a list — with 3+ drivers you would see [Driver2, Driver3, ...] ordered by match_score. Each rejection pops the first entry. When empty the system publishes trip.no_match."
+              }
+            },
+            {
+              "name": "[A-5] PRIMARY Driver Rejects (triggers fallback to other driver)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Primary driver rejected', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "});",
+                      "console.log('Rejected primary driver:', pm.collectionVariables.get('primary_driver_id'));",
+                      "console.log('Transport should now pop fallback driver and re-offer. Wait ~2s then check:');",
+                      "console.log('  1. Kafdrop: new trip.offered.driver message with fallback_driver_id');",
+                      "console.log('  2. RedisInsight: trip:assignment driver_id should now be', pm.collectionVariables.get('fallback_driver_id'));",
+                      "console.log('  3. RedisInsight: candidates:driver:{id} should be gone (fallback was popped)');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{ \"reason\": \"vehicle breakdown\" }"
+                },
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{primary_driver_id}}/trips/{{ranking_trip_id}}/reject",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{primary_driver_id}}", "trips", "{{ranking_trip_id}}", "reject"]
+                }
+              }
+            },
+            {
+              "name": "[A-5b] Get Assignment After Rejection (identifies re-offered driver — wait ~2s first)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Assignment updated to next driver', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    var oldPrimary = pm.collectionVariables.get('primary_driver_id');",
+                      "    pm.expect(json.driver_id).to.not.equal(oldPrimary, 'assignment should have changed to next driver');",
+                      "});",
+                      "var json = pm.response.json();",
+                      "// Save the NEW primary — whoever the system just re-offered.",
+                      "// Works for any number of fallbacks: we always read from the assignment,",
+                      "// not from a static list of IDs we created.",
+                      "pm.collectionVariables.set('fallback_driver_id', json.driver_id);",
+                      "console.log('Old primary (rejected):', pm.collectionVariables.get('primary_driver_id'));",
+                      "console.log('New primary (re-offered, use in A-6 accept):', json.driver_id);",
+                      "console.log('If there were more drivers in the fallback queue, rejecting this one');",
+                      "console.log('would cascade to the next — repeat A-5 → A-5b for each rejection.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transport_base}}/transport/trips/{{ranking_trip_id}}/assignment",
+                  "host": ["{{transport_base}}"],
+                  "path": ["transport", "trips", "{{ranking_trip_id}}", "assignment"]
+                },
+                "description": "After the primary driver rejects, transport pops the next driver from candidates:driver and updates trip:assignment. This step reads the updated assignment to find out who was re-offered. Works regardless of how many fallbacks exist."
+              }
+            },
+            {
+              "name": "[A-6] Re-offered Driver Accepts Trip (uses fallback_driver_id from A-5b)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Re-offered driver accepted', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    pm.expect(pm.response.json().message).to.equal('accepted');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{fallback_driver_id}}/trips/{{ranking_trip_id}}/accept",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{fallback_driver_id}}", "trips", "{{ranking_trip_id}}", "accept"]
+                }
+              }
+            },
+            {
+              "name": "[A-7] Escort Accepts Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{ranking_trip_id}}/accept",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{escort_id}}", "trips", "{{ranking_trip_id}}", "accept"]
+                }
+              }
+            },
+            {
+              "name": "[A-8] FALLBACK Driver Completes Trip",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"photo_url\": \"https://example.com/ranking-dropoff.jpg\",\n  \"dropoff_confirmed\": true\n}"
+                },
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{fallback_driver_id}}/trips/{{ranking_trip_id}}/complete",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{fallback_driver_id}}", "trips", "{{ranking_trip_id}}", "complete"]
+                }
+              }
+            },
+            {
+              "name": "[A-9] Escort Completes Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{ranking_trip_id}}/complete",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{escort_id}}", "trips", "{{ranking_trip_id}}", "complete"]
+                }
+              }
+            },
+            {
+              "name": "[A-10] Verify Audit — driver_id should be the FALLBACK driver",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Audit COMPLETED with fallback driver ID', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.expect(json.outcome).to.equal('COMPLETED');",
+                      "    pm.expect(json.driver_id).to.equal(pm.collectionVariables.get('fallback_driver_id'));",
+                      "    pm.expect(json.aic_hotline).to.be.null;",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{audit_base}}/trips/{{ranking_trip_id}}",
+                  "host": ["{{audit_base}}"],
+                  "path": ["trips", "{{ranking_trip_id}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "── SCENARIO B: No Drivers → trip.no_match ──",
+          "description": "PRE-REQUISITE: Delete or OFFLINE all drivers EXCEPT one (so the fallback list is empty after the first rejection). Use a unique ranking_trip_id — change it in the collection variable before running this block. Suggested: eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+          "item": [
+            {
+              "name": "[B-NOTE] Set ranking_trip_id to eeee... before running this block",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": { "raw": "{{transport_base}}/transport/trips/{{ranking_trip_id}}/status", "host": ["{{transport_base}}"], "path": ["transport", "trips", "{{ranking_trip_id}}", "status"] },
+                "description": "Reminder: change the collection variable 'ranking_trip_id' to a fresh UUID (e.g. eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee) before running this scenario. Also ensure only ONE driver is AVAILABLE so there is no fallback candidate."
+              }
+            },
+            {
+              "name": "[B-1] Submit Trip (only 1 driver available in Tampines)",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"trip_id\": \"{{ranking_trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.36, \"lng\": 103.94 },\n  \"dropoff_location\": { \"lat\": 1.37, \"lng\": 103.95 },\n  \"appointment_datetime\": \"2026-07-16T09:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Tampines\"\n}"
+                },
+                "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+              }
+            },
+            {
+              "name": "[B-2] Only Driver Rejects (no fallback — triggers trip.no_match)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Driver rejected', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "});",
+                      "console.log('Transport should now publish trip.no_match with aic_hotline. Check Kafdrop for trip.no_match topic.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{ \"reason\": \"not available\" }"
+                },
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{ranking_trip_id}}/reject",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{driver_id}}", "trips", "{{ranking_trip_id}}", "reject"]
+                }
+              }
+            },
+            {
+              "name": "[B-3] Verify Audit — NO_MATCH with AIC hotline",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Audit is NO_MATCH with AIC hotline', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.expect(json.outcome).to.equal('NO_MATCH');",
+                      "    pm.expect(json.reason).to.equal('no_available_driver');",
+                      "    pm.expect(json.aic_hotline).to.equal('+65 6354 1818');",
+                      "    pm.expect(json.elderly_id).to.equal(pm.collectionVariables.get('elderly_id'));",
+                      "    pm.expect(json.caregiver_id).to.equal(pm.collectionVariables.get('caregiver_id'));",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{audit_base}}/trips/{{ranking_trip_id}}",
+                  "host": ["{{audit_base}}"],
+                  "path": ["trips", "{{ranking_trip_id}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "── SCENARIO C: Escort Fallback ──",
+          "description": "1 Driver + 2 Escorts in Bedok service area. Escort 1 rejects → re-offer to Escort 2 → Escort 2 accepts. Uses ranking_trip_id — change it to ffffffff-ffff-ffff-ffff-ffffffffffff.",
+          "item": [
+            {
+              "name": "[C-1] Create Escort 1 (primary)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var json = pm.response.json();",
+                      "    pm.collectionVariables.set('escort_id', json.escort_id);",
+                      "    console.log('Escort 1 (primary):', json.escort_id);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"RankTest Care\",\n  \"provider_address\": \"5 Bedok North, Singapore 460005\",\n  \"provider_phone\": \"+6591110005\",\n  \"provider_location\": { \"lat\": 1.32, \"lng\": 103.93 },\n  \"name\": \"Escort Gamma\",\n  \"phone\": \"+6591110055\",\n  \"languages\": [\"english\"],\n  \"specialisations\": [],\n  \"service_areas\": [\"Bedok\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+                },
+                "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+              }
+            },
+            {
+              "name": "[C-2] Create Escort 2 (fallback)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var json = pm.response.json();",
+                      "    pm.collectionVariables.set('escort2_id', json.escort_id);",
+                      "    console.log('Escort 2 (fallback):', json.escort_id);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"provider_id\": \"{{provider_id}}\",\n  \"provider_name\": \"RankTest Care\",\n  \"provider_address\": \"6 Bedok South, Singapore 460006\",\n  \"provider_phone\": \"+6591110006\",\n  \"provider_location\": { \"lat\": 1.32, \"lng\": 103.93 },\n  \"name\": \"Escort Delta\",\n  \"phone\": \"+6591110066\",\n  \"languages\": [\"english\"],\n  \"specialisations\": [],\n  \"service_areas\": [\"Bedok\"],\n  \"availability_windows\": [\n    { \"day\": \"MON\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"TUE\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"WED\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"THU\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"FRI\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SAT\", \"start\": \"00:00\", \"end\": \"23:59\" },\n    { \"day\": \"SUN\", \"start\": \"00:00\", \"end\": \"23:59\" }\n  ]\n}"
+                },
+                "url": { "raw": "{{escort_base}}/escorts", "host": ["{{escort_base}}"], "path": ["escorts"] }
+              }
+            },
+            {
+              "name": "[C-3] Submit Trip (Bedok service area, ranking_trip_id = ffff...)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Trip submitted', function() { pm.expect(pm.response.code).to.equal(202); });",
+                      "console.log('Wait ~3s then run C-3b to identify primary escort.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"trip_id\": \"{{ranking_trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.32, \"lng\": 103.93 },\n  \"dropoff_location\": { \"lat\": 1.33, \"lng\": 103.94 },\n  \"appointment_datetime\": \"2026-07-17T09:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Bedok\"\n}"
+                },
+                "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+              }
+            },
+            {
+              "name": "[C-3b] Get Trip Assignment (identifies PRIMARY escort)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Assignment exists', function() { pm.expect(pm.response.code).to.equal(200); });",
+                      "var json = pm.response.json();",
+                      "var primaryEscortId = json.escort_id;",
+                      "pm.collectionVariables.set('primary_escort_id', primaryEscortId);",
+                      "var e1 = pm.collectionVariables.get('escort_id');",
+                      "var e2 = pm.collectionVariables.get('escort2_id');",
+                      "var fallbackEscortId = (primaryEscortId === e1) ? e2 : e1;",
+                      "pm.collectionVariables.set('fallback_escort_id', fallbackEscortId);",
+                      "pm.collectionVariables.set('primary_driver_id', json.driver_id);",
+                      "console.log('PRIMARY escort (will reject):', primaryEscortId);",
+                      "console.log('FALLBACK escort (will be re-offered):', fallbackEscortId);",
+                      "console.log('Driver in assignment:', json.driver_id);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{transport_base}}/transport/trips/{{ranking_trip_id}}/assignment",
+                  "host": ["{{transport_base}}"],
+                  "path": ["transport", "trips", "{{ranking_trip_id}}", "assignment"]
+                }
+              }
+            },
+            {
+              "name": "[C-4] Driver Accepts Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{primary_driver_id}}/trips/{{ranking_trip_id}}/accept",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{primary_driver_id}}", "trips", "{{ranking_trip_id}}", "accept"]
+                }
+              }
+            },
+            {
+              "name": "[C-5] PRIMARY Escort Rejects (triggers fallback to other escort)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Primary escort rejected', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "});",
+                      "console.log('Transport should publish trip.offered.escort to fallback escort:', pm.collectionVariables.get('fallback_escort_id'));",
+                      "console.log('Wait ~2s then check Kafdrop for trip.offered.escort and RedisInsight trip:assignment.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{ \"reason\": \"family emergency\" }"
+                },
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{primary_escort_id}}/trips/{{ranking_trip_id}}/reject",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{primary_escort_id}}", "trips", "{{ranking_trip_id}}", "reject"]
+                }
+              }
+            },
+            {
+              "name": "[C-6] FALLBACK Escort Accepts Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{fallback_escort_id}}/trips/{{ranking_trip_id}}/accept",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{fallback_escort_id}}", "trips", "{{ranking_trip_id}}", "accept"]
+                }
+              }
+            },
+            {
+              "name": "[C-7] Driver Completes Trip",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"photo_url\": \"https://example.com/escort-fallback.jpg\",\n  \"dropoff_confirmed\": true\n}"
+                },
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{primary_driver_id}}/trips/{{ranking_trip_id}}/complete",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{primary_driver_id}}", "trips", "{{ranking_trip_id}}", "complete"]
+                }
+              }
+            },
+            {
+              "name": "[C-8] FALLBACK Escort Completes Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{fallback_escort_id}}/trips/{{ranking_trip_id}}/complete",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{fallback_escort_id}}", "trips", "{{ranking_trip_id}}", "complete"]
+                }
+              }
+            },
+            {
+              "name": "[C-9] Verify Audit — escort_id should be the FALLBACK escort",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Audit COMPLETED with fallback escort ID', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.expect(json.outcome).to.equal('COMPLETED');",
+                      "    pm.expect(json.escort_id).to.equal(pm.collectionVariables.get('fallback_escort_id'));",
+                      "    pm.expect(json.aic_hotline).to.be.null;",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{audit_base}}/trips/{{ranking_trip_id}}",
+                  "host": ["{{audit_base}}"],
+                  "path": ["trips", "{{ranking_trip_id}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "── SCENARIO D: No Escorts → trip.no_match ──",
+          "description": "1 Driver + 1 Escort in a service area. Escort rejects → no fallback → trip.no_match with AIC hotline. Change ranking_trip_id to 11111111-2222-3333-4444-555555555555 before running.",
+          "item": [
+            {
+              "name": "[D-1] Submit Trip (1 escort available, will reject)",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{\n  \"trip_id\": \"{{ranking_trip_id}}\",\n  \"elderly_id\": \"{{elderly_id}}\",\n  \"caregiver_id\": \"{{caregiver_id}}\",\n  \"pickup_location\": { \"lat\": 1.32, \"lng\": 103.93 },\n  \"dropoff_location\": { \"lat\": 1.33, \"lng\": 103.94 },\n  \"appointment_datetime\": \"2026-07-18T09:00:00\",\n  \"mobility_flags\": [],\n  \"elderly_needs\": [],\n  \"preferred_languages\": [\"english\"],\n  \"service_area\": \"Bedok\"\n}"
+                },
+                "url": { "raw": "{{transport_base}}/transport/trips", "host": ["{{transport_base}}"], "path": ["transport", "trips"] }
+              }
+            },
+            {
+              "name": "[D-2] Driver Accepts Trip",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{driver_base}}/drivers/{{driver_id}}/trips/{{ranking_trip_id}}/accept",
+                  "host": ["{{driver_base}}"],
+                  "path": ["drivers", "{{driver_id}}", "trips", "{{ranking_trip_id}}", "accept"]
+                }
+              }
+            },
+            {
+              "name": "[D-3] Only Escort Rejects (triggers trip.no_match)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Escort rejected', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "});",
+                      "console.log('Transport should publish trip.no_match (no_available_escort) with aic_hotline. Check Kafdrop.');"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "options": { "raw": { "language": "json" } },
+                  "raw": "{ \"reason\": \"sick leave\" }"
+                },
+                "url": {
+                  "raw": "{{escort_base}}/escorts/{{escort_id}}/trips/{{ranking_trip_id}}/reject",
+                  "host": ["{{escort_base}}"],
+                  "path": ["escorts", "{{escort_id}}", "trips", "{{ranking_trip_id}}", "reject"]
+                }
+              }
+            },
+            {
+              "name": "[D-4] Verify Audit — NO_MATCH with AIC hotline (escort reason)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Audit is NO_MATCH with AIC hotline (escort exhausted)', function() {",
+                      "    pm.expect(pm.response.code).to.equal(200);",
+                      "    var json = pm.response.json();",
+                      "    pm.expect(json.outcome).to.equal('NO_MATCH');",
+                      "    pm.expect(json.reason).to.equal('no_available_escort');",
+                      "    pm.expect(json.aic_hotline).to.equal('+65 6354 1818');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{audit_base}}/trips/{{ranking_trip_id}}",
+                  "host": ["{{audit_base}}"],
+                  "path": ["trips", "{{ranking_trip_id}}"]
+                }
+              }
+            }
+          ]
         }
       ]
     }

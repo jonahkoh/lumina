@@ -85,6 +85,7 @@ async def _handle_no_match(data: dict) -> None:
         caregiver_id=uuid.UUID(str(data["caregiver_id"])),
         outcome=AuditOutcome.NO_MATCH,
         reason=data.get("reason"),
+        aic_hotline=data.get("aic_hotline"),
     )
     async with AsyncSessionLocal() as db:
         await _write_audit(body, db)

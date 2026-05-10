@@ -15,16 +15,20 @@ from app.matching import (
     cleanup_trip_redis,
     get_trip_assignment,
     get_trip_composition,
+    get_trip_context,
     is_trip_complete,
     match_trip,
     pop_next_driver,
     pop_next_escort,
+    update_trip_assignment,
     update_trip_composition,
 )
 from app.router import router
 from app.schemas import Location, TripRequest
 
 logger = logging.getLogger(__name__)
+
+AIC_HOTLINE = "+65 6354 1818"
 
 
 def _make_kafka_config(extra: dict | None = None) -> dict:
@@ -114,6 +118,7 @@ async def _handle_trip_requested(data: dict) -> None:
             "elderly_id": str(request.elderly_id),
             "caregiver_id": str(request.caregiver_id),
             "reason": result.reason,
+            "aic_hotline": AIC_HOTLINE,
             "attempted_at": _now_iso(),
         })
         logger.info("No match for trip %s: %s", request.trip_id, result.reason)
@@ -142,28 +147,68 @@ async def _handle_trip_rejected_driver(data: dict) -> None:
 
     next_driver_id = await pop_next_driver(trip_id)
     if next_driver_id:
+        ctx = await get_trip_context(trip_id)
+        assignment = await get_trip_assignment(trip_id)
+        await update_trip_assignment(trip_id, driver_id=next_driver_id)
         publish("trip.offered.driver", {
             "trip_id": trip_id_str,
             "driver_id": next_driver_id,
-            "pickup_location": data.get("pickup_location"),
-            "dropoff_location": data.get("dropoff_location"),
-            "appointment_datetime": data.get("appointment_datetime"),
-            "elderly_needs": data.get("elderly_needs", []),
-            "estimated_price": data.get("estimated_price"),
+            "escort_id": assignment.get("escort_id") if assignment else None,
+            "vehicle_type": ctx.get("vehicle_type") if ctx else None,
+            "pickup_location": ctx.get("pickup_location") if ctx else None,
+            "dropoff_location": ctx.get("dropoff_location") if ctx else None,
+            "appointment_datetime": ctx.get("appointment_datetime") if ctx else None,
+            "elderly_needs": ctx.get("elderly_needs", []) if ctx else [],
+            "estimated_price": ctx.get("estimated_price") if ctx else None,
         })
         logger.info("Re-offered trip %s to next driver %s", trip_id_str, next_driver_id)
         return
 
+    assignment = await get_trip_assignment(trip_id)
+    publish("trip.no_match", {
+        "trip_id": trip_id_str,
+        "elderly_id": assignment.get("elderly_id", "") if assignment else "",
+        "caregiver_id": assignment.get("caregiver_id", "") if assignment else "",
+        "reason": "no_available_driver",
+        "aic_hotline": AIC_HOTLINE,
+        "attempted_at": _now_iso(),
+    })
+    await cleanup_trip_redis(trip_id)
+    logger.info("No more driver candidates for trip %s", trip_id_str)
+
+
+async def _handle_trip_rejected_escort(data: dict) -> None:
+    trip_id_str = data["trip_id"]
+    trip_id = uuid.UUID(trip_id_str)
+
     next_escort_id = await pop_next_escort(trip_id)
-    if not next_escort_id:
-        publish("trip.no_match", {
+    if next_escort_id:
+        ctx = await get_trip_context(trip_id)
+        assignment = await get_trip_assignment(trip_id)
+        await update_trip_assignment(trip_id, escort_id=next_escort_id)
+        publish("trip.offered.escort", {
             "trip_id": trip_id_str,
-            "elderly_id": data.get("elderly_id", ""),
-            "caregiver_id": data.get("caregiver_id", ""),
-            "reason": "no_available_driver",
-            "attempted_at": _now_iso(),
+            "escort_id": next_escort_id,
+            "driver_id": assignment.get("driver_id") if assignment else None,
+            "pickup_location": ctx.get("pickup_location") if ctx else None,
+            "dropoff_location": ctx.get("dropoff_location") if ctx else None,
+            "appointment_datetime": ctx.get("appointment_datetime") if ctx else None,
+            "elderly_needs": ctx.get("elderly_needs", []) if ctx else [],
         })
-        logger.info("No more candidates for trip %s", trip_id_str)
+        logger.info("Re-offered trip %s to next escort %s", trip_id_str, next_escort_id)
+        return
+
+    assignment = await get_trip_assignment(trip_id)
+    publish("trip.no_match", {
+        "trip_id": trip_id_str,
+        "elderly_id": assignment.get("elderly_id", "") if assignment else "",
+        "caregiver_id": assignment.get("caregiver_id", "") if assignment else "",
+        "reason": "no_available_escort",
+        "aic_hotline": AIC_HOTLINE,
+        "attempted_at": _now_iso(),
+    })
+    await cleanup_trip_redis(trip_id)
+    logger.info("No more escort candidates for trip %s", trip_id_str)
 
 
 async def _handle_driver_reaching(data: dict) -> None:
@@ -239,6 +284,7 @@ _HANDLERS = {
     "trip.requested": _handle_trip_requested,
     "trip.accepted.driver": _handle_trip_accepted_driver,
     "trip.rejected.driver": _handle_trip_rejected_driver,
+    "trip.rejected.escort": _handle_trip_rejected_escort,
     "trip.driver_reaching": _handle_driver_reaching,
     "trip.escort_reaching": _handle_escort_reaching,
     "trip.completed.driver": _handle_completed_driver,
