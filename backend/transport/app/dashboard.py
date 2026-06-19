@@ -18,7 +18,7 @@ async def admin_dashboard(provider_id: Optional[uuid.UUID]) -> dict:
         drivers, escorts, trips = await _get_all(client, params)
     past_trips = [t for t in trips if t.get("outcome") == "COMPLETED"]
     upcoming_trips = [
-        tid
+        {"trip_id": str(tid), "driver_id": str(d.get("driver_id", ""))}
         for d in drivers
         for tid in d.get("future_trip_ids", [])
     ]
@@ -49,7 +49,7 @@ async def driver_dashboard(driver_id: uuid.UUID) -> dict:
     return {
         "driver": driver,
         "past_trips": past_trips,
-        "upcoming_trips": driver.get("future_trip_ids", []),
+        "upcoming_trips": [{"trip_id": str(tid)} for tid in driver.get("future_trip_ids", [])],
     }
 
 
@@ -64,5 +64,5 @@ async def escort_dashboard(escort_id: uuid.UUID) -> dict:
     return {
         "escort": escort,
         "past_trips": past_trips,
-        "upcoming_trips": escort.get("future_trip_ids", []),
+        "upcoming_trips": [{"trip_id": str(tid)} for tid in escort.get("future_trip_ids", [])],
     }
