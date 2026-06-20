@@ -1,0 +1,1 @@
+"""Public REST API routes."""
