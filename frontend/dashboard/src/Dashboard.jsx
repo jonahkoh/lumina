@@ -13,11 +13,11 @@ import {
 // ─────────────────────────────────────────────────────────────────────
 
 const API_BASE = '';                                 // e.g. 'http://localhost:8000' or 'https://api.carekiki.dev'
-const DASHBOARD_ENDPOINT = '/transport/dashboard';   // POST { provider_name }
-const MY_BOOKINGS_ENDPOINT = '/transport/my-bookings'; // POST { resource_id, role }
-const ACCEPT_ENDPOINT = '/engine/accept';            // POST { trip_id, resource_id }
-const REJECT_ENDPOINT = '/engine/reject';            // POST { trip_id, resource_id, reason } → { next_match }
-const NOTIFY_ARRIVAL_ENDPOINT = '/engine/notify-arrival'; // POST { trip_id, resource_id }
+const DASHBOARD_ENDPOINT = '/transport/dashboard';   // GET ?role=admin|driver|escort[&id=...]
+const MY_BOOKINGS_ENDPOINT = '/transport/dashboard'; // GET ?role=driver|escort&id={uuid}
+const ACCEPT_ENDPOINT = '';                          // POST /{driver_id}/trips/{trip_id}/accept — within backend/driver/
+const REJECT_ENDPOINT = '';                          // POST /{driver_id}/trips/{trip_id}/reject — within backend/driver/
+const NOTIFY_ARRIVAL_ENDPOINT = '';                  // POST /{trip_id}/reaching { actor_id, actor_type } — not yet implemented
 const PROVIDER_NAME = 'TOUCH Community Services';
 const USE_MOCK_FALLBACK = true;                      // false → empty UI on API error
 
@@ -228,23 +228,15 @@ export default function CarekikiDashboard() {
   const fetchDashboard = async () => {
     setApiState({ status: 'loading', error: null, lastSync: null });
     try {
-      const res = await fetch(`${API_BASE}${DASHBOARD_ENDPOINT}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider_name: PROVIDER_NAME }),
-      });
+      // GET /transport/dashboard?role=admin
+      const res = await fetch(`${API_BASE}${DASHBOARD_ENDPOINT}?role=admin`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      // Backend response shape: { provider, service_areas, drivers, escorts, past_trips, future_trips }
-      if (data.provider)       setProvider(data.provider);
-      if (data.service_areas)  setServiceAreas(data.service_areas);
+      // Backend response shape: { drivers, escorts, past_trips, upcoming_trips }
       if (data.drivers)        setDrivers(data.drivers);
       if (data.escorts)        setEscorts(data.escorts);
-      if (data.past_trips || data.future_trips) {
-        setTrips([...(data.past_trips || []), ...(data.future_trips || [])]);
-      } else if (data.trips) {
-        // backwards-compat if backend ever sends a flat list
-        setTrips(data.trips);
+      if (data.past_trips || data.upcoming_trips) {
+        setTrips([...(data.past_trips || []), ...(data.upcoming_trips || [])]);
       }
       const now = new Date();
       const hh = String(now.getHours()).padStart(2,'0');
@@ -262,23 +254,37 @@ export default function CarekikiDashboard() {
   useEffect(() => { fetchDashboard(); }, []);
 
   const filteredDrivers = useMemo(
-    () => drivers.filter(d => selectedArea === 'all' || d.area === selectedArea),
+    () => drivers.filter(d =>
+      selectedArea === 'all' ||
+      (d.service_areas || []).includes(selectedArea) ||
+      d.area === selectedArea
+    ),
     [drivers, selectedArea]
   );
   const filteredEscorts = useMemo(
-    () => escorts.filter(e => selectedArea === 'all' || e.area === selectedArea),
+    () => escorts.filter(e =>
+      selectedArea === 'all' ||
+      (e.service_areas || []).includes(selectedArea) ||
+      e.area === selectedArea
+    ),
     [escorts, selectedArea]
   );
 
   const byDriverId = useMemo(() => {
     const m = {};
-    trips.forEach(t => { m[t.driverId] = t; });
+    trips.forEach(t => {
+      if (t.driver_id) m[t.driver_id] = t;
+      if (t.driverId)  m[t.driverId]  = t;
+    });
     return m;
   }, [trips]);
 
   const byEscortId = useMemo(() => {
     const m = {};
-    trips.forEach(t => { m[t.escortId] = t; });
+    trips.forEach(t => {
+      if (t.escort_id) m[t.escort_id] = t;
+      if (t.escortId)  m[t.escortId]  = t;
+    });
     return m;
   }, [trips]);
 
